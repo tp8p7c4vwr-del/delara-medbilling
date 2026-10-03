@@ -290,7 +290,7 @@
       ${c.notes ? `<h3>Notes</h3><p>${grLinks(c.notes)}</p>` : ''}
       ${c.gr && c.gr.length ? `<p class="small">Governing rules: ${c.gr.map(g => `<a href="#/rules/${g}">GR ${g}</a>`).join(', ')}</p>` : ''}
       <h3>In the ministry document</h3><div class="links">${docLinks.join('') || '<span class="muted">—</span>'}</div>
-      <h3>Suggested ICD-9 <span class="small muted">(${esc(scopeLabel())})</span></h3>
+      <h3>Suggested ICD-9 <span class="small muted" id="icdsugbasis"></span></h3>
       <div id="icdsug"></div>
       <h3>Modifiers (price list)</h3>
       ${(c.mods || []).length ? `<div class="tablewrap"><table><thead><tr><th>Type</th><th>Code</th><th>Expl.</th><th>Action</th><th>Amount</th></tr></thead><tbody>
@@ -301,7 +301,7 @@
     skillOptions($('.skillsel', el)); $('.skillsel', el).addEventListener('change', e => setSkill(e.target.value));
     $('#askCode').onclick = () => openAI(codePrompt(c));
     $('#copyCode').onclick = () => copy(c.code, 'HSC copied');
-    renderIcdList($('#icdsug'), suggestIcd(c));
+    { const sg = suggestIcd(c); $('#icdsugbasis').textContent = '(' + sg.basis + ')'; renderIcdList($('#icdsug'), sg.rows, sg.empty); }
     if (!quiet && !window.matchMedia('(min-width:900px)').matches) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     if (location.hash !== '#/code/' + code) history.replaceState(null, '', '#/code/' + code);
   }
@@ -336,19 +336,175 @@
     $('#icdscope').textContent = (FULL_ICD.has(skill) || !sc) ? `Fee skill ${skill === 'BASE' ? 'not set' : skill}: full Alberta ICD-9 list (${ICD.length.toLocaleString()} codes).`
       : `Fee skill ${skill}: limited to ${sc.label}. App-defined scope; switch to GP or "Schedule base only" for the full list.`;
   }
+  // ------------------------------------------------------------ HSC -> ICD-9 relevance (app-defined clinical mapping)
+  // Each rule: test(c) on the HSC; n = ICD-9 numeric category ranges; v = V-code ranges; x = exact code prefixes;
+  // pin = ordered high-relevance codes (shown only if present in the Alberta ICD-9 list); q = search terms for further ranking.
+  const GYN_NEO = ['179', '180', '182', '183', '184', '218', '219', '220', '221', '233.1', '233.2', '233.3'];
+  const ch2 = c => parseInt(String(c.code).split('.')[0], 10);
+  const txt = c => [c.desc, c.group, c.sub, c.chapter].filter(Boolean).join(' ');
+  const sec = c => romanOf(c);
+  const FG = c => ['XIII', 'XIV'].includes(sec(c));           // female genital / obstetric sections
+  const ONC = /carcinoma|malignan|cancer|radical|debulk|radium|oncolog/i;
+  const OB_N = [[640, 679]];
+  const SITE_RULES = [
+    { id: 'iud', why: 'Matches procedure: intrauterine contraception',
+      test: c => /intra-?uterine contraceptive|\bIUD\b|\bIUCD\b/i.test(c.desc),
+      v: [[25, 25]], x: ['V45.5', '996.3', '626.2', '627.0'],
+      pin: ['V25.1', 'V25.4', 'V25.0', 'V25.8', 'V45.5', '996.3', '626.2'], q: 'contraceptive intrauterine device' },
+    { id: 'steril', why: 'Matches procedure: sterilization',
+      test: c => (FG(c) || sec(c) === 'XII') && /sterili[sz]|tubal ligation|vasectomy/i.test(c.desc),
+      v: [[25, 26]], x: [], pin: ['V25.2', 'V25.0', 'V26.0'], q: 'sterilization contraceptive' },
+    { id: 'abort', why: 'Matches obstetric event: pregnancy loss / termination',
+      test: c => FG(c) && /abortion|terminat\w* (of )?pregnancy|terminate pregnancy|fetal reduction/i.test(c.desc),
+      n: [[632, 639]], x: ['655', '651', '667.1', '666.2', 'V61.7'],
+      pin: ['635.9', '632', '634.9', '655.9', '655.1', '655.0', '637.9', '667.1', '651.0', '651.1'], q: 'abortion legally induced missed spontaneous fetal abnormality' },
+    { id: 'ectopic', why: 'Matches obstetric event: ectopic pregnancy',
+      test: c => FG(c) && /ectopic|intraperitoneal embryo/i.test(c.desc),
+      x: ['633'], pin: ['633.1', '633.0', '633.2', '633.8', '633.9'], q: 'ectopic tubal pregnancy' },
+    { id: 'cerclage', why: 'Matches obstetric event: cervical incompetence (cerclage)',
+      test: c => FG(c) && /cerclage|suturing of cervix|encircling suture/i.test(c.desc),
+      n: OB_N, x: ['V23'], pinw: 260, pin: ['654.5', 'V23.4', 'V23.5', '644.2'], q: 'cervical incompetence poor obstetric history' },
+    { id: 'pph', why: 'Matches obstetric event: third stage / postpartum haemorrhage',
+      test: c => FG(c) && /placenta|post ?partum hemorrhage|haemorrhage|inverted uterus/i.test(c.desc),
+      n: [[665, 667]], x: ['669.4'], pin: ['666.1', '666.0', '667.0', '666.2', '667.1', '665.2', '666.3'], q: 'postpartum haemorrhage retained placenta inversion uterus' },
+    { id: 'obtrauma', why: 'Matches obstetric event: obstetric laceration / haematoma',
+      test: c => sec(c) === 'XIV' && /laceration|sphincter|hematoma|haematoma/i.test(c.desc),
+      x: ['664', '665', '674', '668', '669.4'], pin: ['664.2', '664.3', '665.3', '665.4', '665.7', '664.1', '674.3', '674.1', '665.1'], q: 'perineal laceration cervix vaginal haematoma wound' },
+    { id: 'cs', why: 'Matches obstetric event: cesarean delivery',
+      test: c => (sec(c) === 'XIV' && ch2(c) === 86) || (FG(c) || sec(c) === 'II') && /cesarean|caesarean/i.test(c.desc) && !/vaginal delivery/i.test(c.desc),
+      n: OB_N, v: [[27, 27]],
+      pin: ['654.2', '669.7', '652.2', '653.4', '656.3', '660.0', '641.0', '651.0', '652.8', 'V27.0'],
+      q: 'caesarean uterine scar malpresentation breech disproportion obstructed labour fetal distress placenta praevia twin' },
+    { id: 'induction', why: 'Matches obstetric event: induction of labour',
+      test: c => sec(c) === 'XIV' && /induction/i.test(c.desc),
+      n: OB_N, v: [[27, 27]], pin: ['645', '658.1', '642.4', '656.5', '648.8', '642.5', '656.3', '651.0'], q: 'prolonged pregnancy premature rupture pre-eclampsia poor fetal growth' },
+    { id: 'vd', why: 'Matches obstetric event: labour and vaginal delivery',
+      test: c => (sec(c) === 'XIV' || sec(c) === 'II') && /deliver|labou?r|forceps|vacuum|ventouse|breech|version|induction|dystocia/i.test(c.desc) && !/drug delivery/i.test(c.desc),
+      n: OB_N, v: [[27, 27]],
+      pin: ['650', '664.0', '664.1', '664.2', '645', '658.1', '660.4', '669.5', '652.2', '654.2', '651.0', '651.1', '661.2', '662.1', 'V27.0', 'V27.2', 'V27.5'],
+      q: 'delivery normal perineal laceration prolonged pregnancy premature rupture shoulder dystocia' },
+    { id: 'ob', why: 'Matches obstetric procedure: pregnancy / fetal assessment', test: c => sec(c) === 'XIV',
+      n: [[630, 679]], v: [[22, 24], [27, 28]], pin: ['655.9', '656.5', '656.3', 'V28.0', 'V28.3', 'V23.9'], q: 'pregnancy antenatal fetal' },
+    { id: 'fert', why: 'Matches procedure: tubal patency / infertility investigation',
+      test: c => FG(c) && /patency|hysterosalping|insufflation|infertil/i.test(c.desc),
+      n: [[628, 628]], x: ['614.6', '256.4', 'V26', '617', '752'], pin: ['628.2', '628.9', 'V26.2', '614.6', '628.0', '617.2'], q: 'infertility female tubal' },
+    { id: 'endo', why: 'Matches condition: endometriosis / pelvic adhesions',
+      test: c => FG(c) && /endometriosis|lysis of adhes/i.test(c.desc),
+      n: [[614, 614], [617, 617]], x: ['625.3', '625.0', '625.9', '628', '620'], pin: ['617.0', '617.1', '617.3', '614.6', '625.3', '625.0', '617.9'], q: 'endometriosis adhesions pelvic pain dysmenorrhoea' },
+    { id: 'congen', why: 'Matches condition: congenital anomaly of female genital tract',
+      test: c => sec(c) === 'XIII' && /congenital/i.test(c.desc),
+      x: ['752', '626.0', '625.0'], pin: ['752.4', '752.3', '752.2', '752.8', '626.0'], q: 'anomalies uterus vagina cervix' },
+    { id: 'gyninj', why: 'Matches condition: non-obstetric injury of female genital tract',
+      test: c => sec(c) === 'XIII' && /injury|non-obstetrical laceration|hematoma|haematoma/i.test(c.desc),
+      x: ['867.4', '867.5', '867.6', '867.7', '939.2', '624.5', '623.6', '998.2', '624.4', '618.7'], pin: ['939.2', '624.5', '623.6', '867.4', '867.5', '998.2', '624.4'], q: 'injury haematoma vulva vagina uterus' },
+    { id: 'cervix', why: 'Matches procedure site: cervix',
+      test: c => FG(c) && (ch2(c) === 79 || /colposcop|cervi(x|cal)|cone biopsy|conization|\bLEEP\b|loop electr/i.test(c.desc)),
+      x: ['622', '616.0', '180', '219.0', '233.1', '795.0', '795.1', '078.1', 'V76.2', 'V72.3', '752.4'],
+      pin: ['795.0', '622.1', '233.1', '180', '616.0', '622.7', '078.1', 'V76.2'], q: 'cervix dysplasia papanicolaou smear carcinoma in situ cervicitis polyp' },
+    { id: 'pessary', why: 'Matches procedure: vaginal pessary (pelvic organ support)',
+      test: c => /pessary/i.test(c.desc) || /^10\.16/.test(c.code),
+      x: ['618', '625.6', '788.3', '996.3', '623.5', '616.1'],
+      pin: ['618.1', '618.0', '618.2', '618.3', '618.4', '618.5', '625.6', '996.3'], q: 'prolapse uterovaginal vaginal wall incontinence stress' },
+    { id: 'ovary', why: 'Matches procedure site: ovary / adnexa',
+      test: c => FG(c) && ([77, 78].includes(ch2(c)) || /ovar|oophor|salping|fallopian|adnex/i.test(c.desc)),
+      n: [[614, 614], [620, 620], [628, 628]], x: ['183', '198.6', '220', '236.2', '256.4', '625.9', '617.1', '617.2', 'V26', 'V84'],
+      pin: ['620.2', '620.0', '617.1', '614.6', '220', '183.0', '256.4'], onc: ['183.0', '183', '198.6', '236.2'], q: 'ovarian cyst endometriosis adhesions neoplasm ovary' },
+    { id: 'uterus', why: 'Matches procedure site: uterus',
+      test: c => FG(c) && ([80, 81].includes(ch2(c)) || /hysterect|myomect|endometri|uter(us|ine)|curettage|D ?& ?C\b/i.test(c.desc)),
+      n: [[615, 615], [617, 618], [621, 621], [625, 627]], x: ['179', '180', '182', '218', '219.1', '233.1', '233.2', '236.0', '614', '620', '752'],
+      pin: ['218', '626.2', '627.1', '618.1', '617.0', '621.0', '621.3', '182.0', '625.3'], onc: ['182.0', '180', '179', '233.2', '236.0'],
+      q: 'uterus leiomyoma menorrhagia excessive menstruation postmenopausal bleeding prolapse endometrial hyperplasia' },
+    { id: 'vagina', why: 'Matches procedure site: vagina / pelvic floor', test: c => FG(c) && ch2(c) === 82,
+      n: [[618, 619], [623, 623]], x: ['614.4', '616.1', '184.0', '221.1', '233.3', '625.0', '625.6', '752.4', '078.1', '996.3'],
+      pin: ['618.0', '618.5', '623.0', '616.1', '619.1', '625.6', '625.0', '221.1'], onc: ['184.0', '233.3'], q: 'vagina vaginal wall prolapse dysplasia vaginitis fistula' },
+    { id: 'vulva', why: 'Matches procedure site: vulva / perineum', test: c => FG(c) && (ch2(c) === 83 || /vulv|bartholin|perine/i.test(c.desc)),
+      n: [[624, 624]], x: ['616', '184.4', '221.2', '233.3', '078.1', '625.0', '618.7'],
+      pin: ['616.2', '616.3', '624.0', '624.8', '616.1', '078.1', '624.4', '184.4'], onc: ['184.4', '233.3', '624.0'], q: 'vulva bartholin cyst abscess dystrophy' },
+    { id: 'gyn', why: 'Matches procedure site: female genital organs', test: c => sec(c) === 'XIII',
+      n: [[614, 629]], v: [[25, 26], [72, 72]], x: GYN_NEO, pin: [], q: 'female genital' },
+    { id: 'breast', why: 'Matches procedure site: breast', test: c => sec(c) === 'XVI',
+      n: [[610, 611]], x: ['174', '175', '217', '233.0', '238.3', '239.3', '793.8', 'V10.3', 'V16.3', 'V76.1'], pin: ['174.9', '611.7', '610.0', '610.1', '217', '233.0', '793.8'], onc: ['174.9', '233.0', '174'], q: 'breast neoplasm mass' }
+  ];
+  // Body-system ranges for other procedure sections (operations on X → diagnoses of X).
+  const SYS = {
+    II: { why: 'nervous system', n: [[320, 359], [191, 192], [225, 225], [430, 438], [741, 742], [850, 854], [950, 957]] },
+    III: { why: 'endocrine system', n: [[240, 259], [193, 194], [226, 227]] },
+    IV: { why: 'eye', n: [[360, 379], [190, 190], [224, 224], [743, 743], [870, 871], [918, 918], [921, 921], [930, 930], [940, 940]] },
+    V: { why: 'ear', n: [[380, 389], [744, 744], [872, 872], [931, 931]] },
+    VI: { why: 'nose, mouth and pharynx', n: [[470, 478], [520, 529], [140, 149], [160, 160], [210, 210], [749, 749], [802, 802], [873, 873], [932, 933]] },
+    VII: { why: 'respiratory system', n: [[460, 519], [160, 163], [212, 212], [231, 231], [786, 786], [860, 862], [934, 934]] },
+    VIII: { why: 'cardiovascular system', n: [[390, 459], [745, 747], [785, 785]] },
+    IX: { why: 'haemic and lymphatic system', n: [[200, 208], [280, 289], [196, 196], [785, 785]] },
+    X: { why: 'digestive system', n: [[520, 579], [150, 159], [211, 211], [230, 230], [787, 787], [935, 938]] },
+    XI: { why: 'urinary tract', n: [[580, 599], [188, 189], [223, 223], [753, 753], [788, 788], [791, 791], [866, 867]], x: ['625.6', '996.3'] },
+    XII: { why: 'male genital organs', n: [[600, 608], [185, 187], [222, 222], [752, 752]], v: [[25, 26]] },
+    XV: { why: 'musculoskeletal system', n: [[710, 739], [800, 848], [754, 756], [170, 171], [213, 213], [215, 215], [905, 905]] },
+    XVII: { why: 'skin and subcutaneous tissue', n: [[680, 709], [172, 173], [214, 214], [216, 216], [232, 232], [870, 897], [910, 919], [940, 949], [110, 111]], x: ['078.1'] }
+  };
+  function icdAllowed(i, r) {
+    const code = i.code;
+    if ((r.x || []).some(p => code === p || code.startsWith(p + '.') || (p.includes('.') && code.startsWith(p)))) return true;
+    if (code[0] === 'E') return false;
+    if (code[0] === 'V') { const n = parseInt(code.slice(1, 3), 10); return (r.v || []).some(([a, b]) => n >= a && n <= b); }
+    const n = parseInt(code.slice(0, 3), 10);
+    return (r.n || []).some(([a, b]) => n >= a && n <= b);
+  }
+  function icdRuleFor(c) {
+    const r = SITE_RULES.find(r => r.test(c));
+    if (r) return r;
+    const s = SYS[sec(c)];
+    if (s) return { id: 'sys', why: 'Matches procedure body system: ' + s.why, n: s.n, v: s.v, x: s.x, pin: [], q: '' };
+    return null; // visits, consultations and general services: fee-skill scope
+  }
   function suggestIcd(c) {
-    let q = [c.desc, c.group, c.sub].filter(Boolean).join(' ').replace(/\d{2}\.\d+\s?[A-Z]*/g, ' ');
+    const MAX = 8;
+    const q = [c.desc, c.group, c.sub].filter(Boolean).join(' ').replace(/\d{2}\.\d+\s?[A-Z]*/g, ' ');
+    const rule = icdRuleFor(c);
+    if (rule) {
+      const STOP = new Set(['delivery', 'vaginal', 'management', 'procedure', 'other', 'section', 'approach', 'method', 'repair', 'includes', 'without', 'additional', 'benefit', 'assisted', 'presentation', 'following', 'reason', 'minutes', 'first', 'claimed', 'abdominal', 'surgical', 'treatment', 'removal', 'insertion', 'operations', 'labour', 'labor', 'pregnancy', 'blood', 'absence', 'uterus', 'uterine', 'induction', 'medical', 'ectopic', 'umbilical', 'sampling', 'percutaneous']);
+      const STOP6 = new Set(['hyster', 'pregna', 'labour', 'cesare', 'obstet']);
+      const SYN = { multip: ['twin', 'triplet', 'multip'], reduct: ['twin', 'triplet'], incisi: ['wound', 'surgic'], rectal: ['fourth'], sphinc: ['third', 'fourth'], efface: ['incompet'], encirc: ['incompet'] };
+      const fold = s => s.toLowerCase().replace(/ae/g, 'e').replace(/oe/g, 'e');
+      const words = [...new Set((fold(c.desc).match(/[a-z]{5,}/g) || []).filter(w => !STOP.has(w)).map(w => w.slice(0, 6)).filter(w => !STOP6.has(w)))].flatMap(w => SYN[w] || [w]);
+      const wm = i => { const d = fold(i.desc); return words.filter(w => d.includes(w)).length; };
+      const onc = ONC.test(c.desc) && rule.onc ? rule.onc : [];
+      const cand = new Map();
+      const add = (i, base, score) => { if (!i || !icdAllowed(i, rule)) return; const prev = cand.get(i.code); const v = base + wm(i) * 100; if (!prev || prev.v < v) cand.set(i.code, { i, v, score }); };
+      onc.forEach((code, k) => add(ICDBY[code], 300 - k, null));
+      (rule.pin || []).forEach((code, k) => add(ICDBY[code], (rule.pinw || 60) - k, null));
+      const query = (rule.q || '') + ' ' + q.split(/\s+/).slice(0, 8).join(' ');
+      icdIndex.search(query, { limit: 40, filter: d => icdAllowed(d.i, rule), boost: d => d.i.code.includes('.') ? 1.1 : 1 }).hits
+        .forEach(h => add(h.doc.i, Math.min(h.score, 30), h.score));
+      const out = [...cand.values()].sort((x, y) => y.v - x.v).map(r => ({ i: r.i, score: (rule.pin || []).includes(r.i.code) || onc.includes(r.i.code) ? null : r.score, why: rule.why }));
+      return { rows: out.slice(0, MAX), basis: rule.why };
+    }
     let extra = '';
     CONCEPTS.forEach(([re, words]) => { if (re.test(c.desc + ' ' + (c.group || '') + ' ' + (c.sub || ''))) extra += ' ' + words; });
-    if (/consultation|visit|assessment/i.test(c.desc) && skill === 'OBGY' && !/prenatal|obstetric/i.test(c.desc)) extra += ' pregnancy supervision pelvic pain menstruation menopausal';
-    // procedure words alone rarely match diagnoses: rely mostly on concept words
-    const res = icdIndex.search((extra || q) + ' ' + (extra ? q.split(/\s+/).slice(0, 6).join(' ') : ''), { limit: 10, filter: d => icdInScope(d.i), boost: d => d.i.code.includes('.') ? 1.1 : 1 });
-    return res.hits.map(h => ({ i: h.doc.i, score: h.score }));
+    const isVisit = /consultation|visit|assessment|examination|interview/i.test(c.desc + ' ' + (c.sub || ''));
+    if (isVisit && skill === 'OBGY' && !/prenatal|obstetric/i.test(c.desc)) extra += ' pregnancy supervision pelvic pain menstruation menopausal';
+    const why = (isVisit ? 'Visit/consultation code: ' : 'General service: ') + (FULL_ICD.has(skill) || !ICD_SCOPE[skill] ? 'full list (fee skill ' + (skill === 'BASE' ? 'not set' : skill) + ')' : skill + ' fee-skill scope');
+    const VISIT_PINS = { OBGY: ['V22.1', 'V22.0', 'V23.9', 'V24.2', 'V72.3', '626.2', '627.1', '625.3'] };
+    if (isVisit && VISIT_PINS[skill]) {
+      const rows = VISIT_PINS[skill].map(k => ICDBY[k]).filter(i => i && icdInScope(i)).map(i => ({ i, why }));
+      return { rows: rows.slice(0, MAX), basis: why };
+    }
+    if (isVisit) return { rows: [], basis: why, empty: 'Visit codes: diagnosis follows the presenting condition. Search the ICD-9 tab (' + scopeLabel() + ').' };
+    const res = icdIndex.search((extra || q) + ' ' + (extra ? q.split(/\s+/).slice(0, 6).join(' ') : ''), { limit: MAX, filter: d => icdInScope(d.i), boost: d => d.i.code.includes('.') ? 1.1 : 1 });
+    return { rows: res.hits.slice(0, MAX).map(h => ({ i: h.doc.i, score: h.score, why })), basis: why };
   }
-  function renderIcdList(el, rows) {
-    if (!rows.length) { el.innerHTML = '<p class="muted small">No ICD-9 suggestions in this scope.</p>'; return; }
-    el.innerHTML = rows.map(r => `<div class="icdrow"><div><span class="code">${esc(r.i.code)}</span> ${esc(r.i.desc)}
-      <div class="small muted">${esc(r.i.block || '')}${r.score != null ? ' · score ' + r.score.toFixed(2) : ''}</div></div>
+  // Sub-codes in the Alberta list often read only "Unspecified" or "Ovary"; prefix the parent category for context.
+  function icdLabel(i) {
+    if (!i.code.includes('.') || i.desc.length > 40) return i.desc;
+    let p = ICDBY[i.code.split('.')[0]];
+    if (!p && i.code.split('.')[1].length > 1) p = ICDBY[i.code.slice(0, -1)];
+    // The source PDF repeats a child's title on a few parent rows (e.g. 618); skip those parents rather than mislabel.
+    const dup = p && [...'0123456789'].some(d => { const k = ICDBY[p.code + '.' + d]; return k && p.desc.slice(0, 30).toLowerCase() === k.desc.slice(0, 30).toLowerCase(); });
+    return p && p.desc && !dup && !i.desc.toLowerCase().includes(p.desc.toLowerCase()) ? p.desc + ': ' + i.desc : i.desc;
+  }
+  function renderIcdList(el, rows, emptyMsg) {
+    if (!rows.length) { el.innerHTML = '<p class="muted small">' + esc(emptyMsg || 'No ICD-9 suggestions in this scope.') + '</p>'; return; }
+    el.innerHTML = rows.map(r => `<div class="icdrow"><div><span class="code">${esc(r.i.code)}</span> ${esc(icdLabel(r.i))}
+      <div class="small muted">${esc(r.i.block || '')}${r.score != null ? ' · score ' + r.score.toFixed(2) : (r.why ? ' · key match' : '')}</div>${r.why ? `<div class="small why">Why suggested: ${esc(r.why)}</div>` : ''}</div>
       <div class="btns"><button class="ghost" data-copy="${esc(r.i.code)}">Copy</button><button class="ghost" data-medres="${esc(r.i.code)}">More about this condition</button></div></div>`).join('');
   }
   function icdSearch(q) {
@@ -364,8 +520,9 @@
 
   // ------------------------------------------------------------ Medical resources
   function condTerm(i) {
-    return i.desc.replace(/\([^)]*\)/g, ' ').replace(/,?\s*(unspecified|not elsewhere classified|nec|other specified|other|unspecified site)\b/gi, ' ')
-      .replace(/\s+/g, ' ').trim() || i.desc;
+    const d = icdLabel(i);
+    return d.replace(/\([^)]*\)/g, ' ').replace(/:/g, ' ').replace(/,?\s*(unspecified|not elsewhere classified|nec|other specified|other|unspecified site)\b/gi, ' ')
+      .replace(/\s+/g, ' ').replace(/[:,]\s*$/, '').trim() || d;
   }
   function resourcesHtml(icd) {
     const term = icd ? condTerm(icd) : null;
@@ -398,7 +555,7 @@
     const i = ICDBY[code]; if (!i) return;
     let sec = $('#tab-medres');
     if (!sec) { sec = document.createElement('section'); sec.id = 'tab-medres'; sec.className = 'tab'; $('#main').appendChild(sec); }
-    sec.innerHTML = `<div class="condhead"><div class="small muted">Medical resources</div><h2><span class="code">${esc(i.code)}</span> ${esc(i.desc)}</h2>
+    sec.innerHTML = `<div class="condhead"><div class="small muted">Medical resources</div><h2><span class="code">${esc(i.code)}</span> ${esc(icdLabel(i))}</h2>
       <div class="small muted">${esc(i.block || '')}${i.excl ? ' · ' + esc(i.excl) : ''}</div>
       <div class="row mt8"><button class="ghost" data-copy="${esc(i.code)}">Copy ICD-9</button><button class="ghost" id="medBack">Back</button></div></div>` + resourcesHtml(i);
     wireRegion(sec, i);
