@@ -11,9 +11,21 @@
   const fmtDate = iso => { const [y, m, d] = iso.split('-').map(Number); return `${d} ${MONTHS[m - 1]} ${y}`; };
   const shortDate = iso => { const [y, m, d] = iso.split('-').map(Number); return `${d} ${MONTHS[m - 1].slice(0, 3)} ${y}`; };
 
-  let META, CODES, BYCODE = {}, RULES, RULEBY = {}, MODS, MODTYPE = {}, MODCODE = {}, EXPL, ICD, ICDBY = {}, BULL, BULLBY = {}, RES;
+  let TOP, META, CODES, BYCODE = {}, RULES, RULEBY = {}, MODS, MODTYPE = {}, MODCODE = {}, EXPL, ICD, ICDBY = {}, BULL, BULLBY = {}, RES;
   let codeIndex, icdIndex;
   let skill = LS.get('skill', 'OBGY');
+  // ---- Phone/tablet mode: automatic on touch devices under 1024px wide or a mobile UA; user choice is remembered.
+  const autoPhone = () => ((('ontouchstart' in window) || navigator.maxTouchPoints > 0) && window.innerWidth < 1024) ||
+    /iPhone|iPod|iPad|Android|Mobile/i.test(navigator.userAgent);
+  let phone = false;
+  function applyLayout() {
+    const pref = LS.get('layout', '');
+    phone = pref ? pref === 'phone' : autoPhone();
+    document.documentElement.classList.toggle('phone', phone);
+    const t = document.getElementById('layoutToggle');
+    if (t) { t.hidden = !(phone || pref === 'desktop' || autoPhone()); t.textContent = phone ? 'Desktop version' : 'Phone version'; }
+  }
+  applyLayout();
   let region = LS.get('region', 'CA');
   let lastQuery = '', current = null;
 
@@ -87,7 +99,7 @@
   // ------------------------------------------------------------ boot
   async function boot() {
     const get = n => fetch('data/' + n + '.json').then(r => r.json());
-    [META, CODES, RULES, MODS, EXPL, ICD, BULL, RES] = await Promise.all(['meta', 'codes', 'rules', 'modifiers', 'explanatory', 'icd9', 'bulletins', 'resources'].map(get));
+    [META, CODES, RULES, MODS, EXPL, ICD, BULL, RES, TOP] = await Promise.all(['meta', 'codes', 'rules', 'modifiers', 'explanatory', 'icd9', 'bulletins', 'resources', 'top-sources'].map(get));
     CODES.forEach(c => BYCODE[c.code] = c);
     RULES.forEach(r => RULEBY[r.id] = r);
     MODS.forEach(t => { MODTYPE[t.type] = t; t.codes.forEach(c => MODCODE[t.type + ':' + c.code] = c); });
@@ -114,10 +126,13 @@
     const sel = $('#skill'); skillOptions(sel);
     if (!sel.value) { skill = 'OBGY'; sel.value = skill; }
     sel.addEventListener('change', () => setSkill(sel.value));
+    const chip = $('#skillChip'); skillOptions(chip); chip.value = sel.value; $('#skillChipText').textContent = sel.value === 'BASE' ? 'Base' : sel.value;
+    chip.addEventListener('change', () => setSkill(chip.value));
   }
   function setSkill(v) {
     skill = v; LS.set('skill', v);
-    $$('select.skillsel, #skill').forEach(s => s.value = v);
+    $$('select.skillsel, #skill, #skillChip').forEach(s => s.value = v);
+    const ct = $('#skillChipText'); if (ct) ct.textContent = v === 'BASE' ? 'Base' : v;
     $('#limitSkill').disabled = !SKILL_SECTIONS[skill];
     if (lastQuery) doSearch(lastQuery, true);
     if (current) showCode(current, true);
@@ -137,8 +152,9 @@
   // ------------------------------------------------------------ routing (hash holds only codes, never typed text)
   function showTab(name) {
     $$('.tab').forEach(t => t.classList.toggle('on', t.id === 'tab-' + name));
-    $$('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === name));
+    $$('#tabs button, #moreMenu button').forEach(b => b.classList.toggle('on', b.dataset.tab === name));
   }
+  function closeMore() { const m = $('#moreMenu'); if (m) { m.hidden = true; $('#moreBtn').setAttribute('aria-expanded', 'false'); } }
   function route() {
     const h = decodeURIComponent(location.hash.slice(2));
     const [kind, arg] = [h.split('/')[0], h.split('/').slice(1).join('/')];
@@ -154,7 +170,7 @@
     current = null; lastQuery = '';
     const q = $('#q'); q.value = ''; $('#qclear').hidden = true; q.blur();
     $('#results')._ctx = null; doSearch('');
-    const d = $('#detail'); d.hidden = true; d.innerHTML = ''; d.scrollTop = 0;
+    const d = $('#detail'); d.hidden = true; d.innerHTML = ''; d.scrollTop = 0; $('.split').classList.remove('showing'); closeMore();
     $$('dialog[open]').forEach(x => x.close());
     showTab('procedures');
     if (location.hash) history.pushState(null, '', location.pathname + location.search);
@@ -230,7 +246,7 @@
       const c = h.doc.c, f = feeFor(c);
       return `<button class="hit${current === c.code ? ' sel' : ''}" data-code="${esc(c.code)}">
         <div class="row1"><span class="code">${esc(c.display || c.code)}</span><span class="fee">${f.amount == null ? esc(f.label) : money(f.amount)}</span></div>
-        <div>${esc(c.desc)}</div>
+        <div class="hdesc">${esc(c.desc)}</div>
         <div class="score">#${i + 1} · score ${h.score.toFixed(2)} (${Math.round(100 * h.score / top)}%) · ${esc(f.label)}${c.cat ? ' · cat ' + esc(c.cat) : ''}
         ${c.bulletins && c.bulletins.some(b => !b.superseded) ? ' · <span class="badge b">MED ' + c.bulletins[0].num + '</span>' : ''}</div></button>`;
     }).join('');
@@ -282,6 +298,8 @@
       if (/consultation/i.test(c.desc) && minutes > 30 && BYCODE['03.08M'] && c.code !== '03.08M') { const x = BYCODE['03.08M']; call.push(`Extended consultation over 30 min: <a href="#/code/03.08M">03.08M</a> ${esc(x.desc)} <span class="fee">${money(feeFor(x).amount)}</span>`); }
     }
     const skillRows = Object.entries(c.skill || {});
+    if (phone) { phoneCard(c, f, call, docLinks, el); return; }
+    $('.split').classList.remove('showing');
     el.innerHTML = `
       <div class="mobileskill">Fee skill <select class="skillsel" aria-label="Fee skill"></select></div>
       <div class="row1"><span class="code codebig">${esc(c.display || c.code)}</span>
@@ -312,6 +330,35 @@
     { const sg = suggestIcd(c); $('#icdsugbasis').textContent = '(' + sg.basis + ')'; renderIcdList($('#icdsug'), sg.rows, sg.empty); }
     if (!quiet && !window.matchMedia('(min-width:900px)').matches) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     if (location.hash !== '#/code/' + code) history.replaceState(null, '', '#/code/' + code);
+  }
+
+  // Phone code card: fee, key notes collapsed, ICD-9 suggestions, Document / Ask AI / More about this condition.
+  let pickedIcd = null;
+  function phoneCard(c, f, call, docLinks, el) {
+    el.innerHTML = `<div class="pcard">
+      <button type="button" class="ghost back" id="pBack">‹ Results</button>
+      <div class="row1"><span class="code codebig">${esc(c.display || c.code)}</span>${c.cat ? `<span class="badge">cat ${esc(c.cat)}</span>` : ''}</div>
+      <h2>${esc(c.desc)}</h2>
+      <div class="pfee"><div class="fee big">${f.amount == null ? esc(f.label) : money(f.amount)}</div>
+        <div class="small muted">Schedule fee (${esc(skill === 'BASE' ? 'base' : skill)})${skill !== 'BASE' && f.amount !== c.base && !c.byAssess ? ' · base ' + money(c.base) : ''}${c.ane != null ? ' · anaesthetic ' + money(c.ane) + ' (separate)' : ''}</div></div>
+      <div class="pbtns"><button type="button" class="ghost" id="pDoc" aria-expanded="false">Document</button><button type="button" class="ghost" id="askCode">Ask AI</button><button type="button" class="ghost" id="pMore">More about this condition</button></div>
+      <div id="pDocs" class="links" hidden>${docLinks.join('') || '<span class="muted">No document page listed.</span>'}</div>
+      ${call.length ? `<details><summary>For your description</summary><ul>${call.map(x => `<li>${x}</li>`).join('')}</ul></details>` : ''}
+      ${c.notes || (c.gr && c.gr.length) ? `<details><summary>Key notes</summary>${c.notes ? `<p>${grLinks(c.notes)}</p>` : ''}${c.gr && c.gr.length ? `<p class="small">Governing rules: ${c.gr.map(g => `<a href="#/rules/${g}">GR ${g}</a>`).join(', ')}</p>` : ''}</details>` : ''}
+      <h3>Suggested ICD-9</h3><p class="small muted" id="icdsugbasis"></p><div id="icdsug" class="picklist"></div></div>`;
+    const sg = suggestIcd(c); $('#icdsugbasis').textContent = sg.basis; renderIcdList($('#icdsug'), sg.rows, sg.empty);
+    pickedIcd = sg.rows.length ? sg.rows[0].i.code : null;
+    const mark = () => $$('#icdsug .icdrow').forEach(r => r.classList.toggle('picked', r.dataset.icd === pickedIcd));
+    mark();
+    $('#icdsug').addEventListener('click', e => { const r = e.target.closest('.icdrow'); if (r && !e.target.closest('button')) { pickedIcd = r.dataset.icd; mark(); } });
+    $('#pMore').disabled = !pickedIcd;
+    $('#pMore').onclick = () => pickedIcd && showMedRes(pickedIcd);
+    $('#pDoc').onclick = () => { const d = $('#pDocs'); d.hidden = !d.hidden; $('#pDoc').setAttribute('aria-expanded', String(!d.hidden)); };
+    $('#askCode').onclick = () => openAI(codePrompt(c));
+    $('#pBack').onclick = () => { current = null; el.hidden = true; el.innerHTML = ''; $('.split').classList.remove('showing'); $$('.hit').forEach(b => b.classList.remove('sel')); history.replaceState(null, '', location.pathname + location.search); window.scrollTo(0, 0); };
+    $('.split').classList.add('showing');
+    window.scrollTo(0, 0);
+    if (location.hash !== '#/code/' + c.code) history.replaceState(null, '', '#/code/' + c.code);
   }
 
   // ------------------------------------------------------------ ICD-9
@@ -511,7 +558,7 @@
   }
   function renderIcdList(el, rows, emptyMsg) {
     if (!rows.length) { el.innerHTML = '<p class="muted small">' + esc(emptyMsg || 'No ICD-9 suggestions in this scope.') + '</p>'; return; }
-    el.innerHTML = rows.map(r => `<div class="icdrow"><div><span class="code">${esc(r.i.code)}</span> ${esc(icdLabel(r.i))}
+    el.innerHTML = rows.map(r => `<div class="icdrow" data-icd="${esc(r.i.code)}"><div><span class="code">${esc(r.i.code)}</span> ${esc(icdLabel(r.i))}
       <div class="small muted">${esc(r.i.block || '')}${r.score != null ? ' · score ' + r.score.toFixed(2) : (r.why ? ' · key match' : '')}</div>${r.why ? `<div class="small why">Why suggested: ${esc(r.why)}</div>` : ''}</div>
       <div class="btns"><button class="ghost" data-copy="${esc(r.i.code)}">Copy</button><button class="ghost" data-medres="${esc(r.i.code)}">More about this condition</button></div></div>`).join('');
   }
@@ -527,10 +574,17 @@
   }
 
   // ------------------------------------------------------------ Medical resources
+  // Search term = condition name only. Use the code's own title when it is specific; fall back to parent + title.
   function condTerm(i) {
-    const d = icdLabel(i);
-    return d.replace(/\([^)]*\)/g, ' ').replace(/:/g, ' ').replace(/,?\s*(unspecified|not elsewhere classified|nec|other specified|other|unspecified site)\b/gi, ' ')
-      .replace(/\s+/g, ' ').replace(/[:,]\s*$/, '').trim() || d;
+    const GENERIC = /^(unspecified|other|others|without|with |not specified|site unspecified|closed|open|nos\b|ovary$|uterus$|vagina$|vulva$|breast)/i;
+    const own = i.desc.trim();
+    let d = own;
+    if (own.length < 14 || GENERIC.test(own)) { const lab = icdLabel(i); d = lab.includes(': ') ? lab.split(': ')[0] : lab; }
+    if (GENERIC.test(d) && i.block) d = i.block.replace(/\([^)]*\)/g, '').trim();
+    d = d.replace(/,\s*(closed|open)$/i, '');
+    return d.replace(/\([^)]*\)/g, ' ').replace(/:/g, ' ').replace(/\b(without|with) mention of .*$/i, ' ')
+      .replace(/,?\s*(unspecified|not elsewhere classified|nec|other specified|other|unspecified site|not specified as malignant or benign)\b/gi, ' ')
+      .replace(/\s+/g, ' ').replace(/[:,\s-]+$/, '').trim() || own;
   }
   function resourcesHtml(icd) {
     const term = icd ? condTerm(icd) : null;
@@ -559,13 +613,34 @@
     el.innerHTML = `<div class="condhead"><h2>Resources</h2><p class="small muted">Clinical and guideline sources by region. Open “More about this condition” on any ICD-9 code for condition-specific searches.</p></div>` + resourcesHtml(null);
     wireRegion(el, null);
   }
+  // Top sources: ICD-9 range -> specialty -> ranked top 10 sites and top 10 journals (curated, data/top-sources.json).
+  function topSpecialty(i) {
+    const code = i.code;
+    for (const m of TOP.map) {
+      if (m.kind === 'x' && m.val.some(p => code === p || code.startsWith(p + '.') || (p.includes('.') && code.startsWith(p)))) return m.sp;
+      if (m.kind === 'e' && code[0] === 'E') return m.sp;
+      if (m.kind === 'v' && code[0] === 'V') { const n = parseInt(code.slice(1, 3), 10); if (n >= m.val[0] && n <= m.val[1]) return m.sp; }
+      if (m.kind === 'n' && /^\d/.test(code)) { const n = parseInt(code.slice(0, 3), 10); if (n >= m.val[0] && n <= m.val[1]) return m.sp; }
+    }
+    return 'gen';
+  }
+  function topSourcesHtml(i) {
+    const sp = TOP.specialties[topSpecialty(i)], term = condTerm(i), qe = encodeURIComponent(term);
+    const sub = x => x.sub ? ' <span class="badge sub">subscription</span>' : '';
+    const sites = sp.sites.map(k => TOP.sites[k]).map(s => `<li><a href="${esc(s.search ? s.search.replace('{q}', qe) : s.home)}" target="_blank" rel="noopener noreferrer">${esc(s.name)}</a> <span class="small muted">${s.search ? 'search' : 'site'}</span>${sub(s)}</li>`).join('');
+    const jours = sp.journals.map(k => TOP.journals[k]).map(j => `<li><a href="${esc('https://pubmed.ncbi.nlm.nih.gov/?term=' + encodeURIComponent(term + ' AND "' + j.nlm + '"[jour]'))}" target="_blank" rel="noopener noreferrer">${esc(j.name)}</a> <span class="small muted">PubMed in journal · <a href="${esc(j.home)}" target="_blank" rel="noopener noreferrer">journal site</a></span>${sub(j)}</li>`).join('');
+    return `<div class="topsrc"><h3>Top sources for <span class="code">${esc(i.code)}</span> ${esc(icdLabel(i))}</h3>
+      <p class="small muted">${esc(sp.label)}. Ranked by authority, then relevance. Searches carry only "${esc(term)}".</p>
+      <div class="topgrid"><div><h4>Top 10 websites</h4><ol>${sites}</ol></div><div><h4>Top 10 journals</h4><ol>${jours}</ol></div></div></div>
+      <h3>Directory by region</h3>`;
+  }
   function showMedRes(code) {
     const i = ICDBY[code]; if (!i) return;
     let sec = $('#tab-medres');
     if (!sec) { sec = document.createElement('section'); sec.id = 'tab-medres'; sec.className = 'tab'; $('#main').appendChild(sec); }
     sec.innerHTML = `<div class="condhead"><div class="small muted">Medical resources</div><h2><span class="code">${esc(i.code)}</span> ${esc(icdLabel(i))}</h2>
       <div class="small muted">${esc(i.block || '')}${i.excl ? ' · ' + esc(i.excl) : ''}</div>
-      <div class="row mt8"><button class="ghost" data-copy="${esc(i.code)}">Copy ICD-9</button><button class="ghost" id="medBack">Back</button></div></div>` + resourcesHtml(i);
+      <div class="row mt8"><button class="ghost" data-copy="${esc(i.code)}">Copy ICD-9</button><button class="ghost" id="medBack">Back</button></div></div>` + topSourcesHtml(i) + resourcesHtml(i);
     wireRegion(sec, i);
     $('#medBack', sec).onclick = () => history.back();
     showTab('medres');
@@ -737,6 +812,15 @@
   let tt; function toast(t) { const el = $('#toast'); el.textContent = t; el.hidden = false; clearTimeout(tt); tt = setTimeout(() => el.hidden = true, 2200); }
 
   function wire() {
+    $('#moreBtn').addEventListener('click', e => { e.stopPropagation(); const m = $('#moreMenu'); m.hidden = !m.hidden; $('#moreBtn').setAttribute('aria-expanded', String(!m.hidden)); });
+    $('#moreMenu').addEventListener('click', e => { const b = e.target.closest('button[data-tab]'); if (!b) return; closeMore(); if (b.dataset.tab === 'procedures') { goHome(); return; } showTab(b.dataset.tab); history.replaceState(null, '', '#/' + b.dataset.tab); window.scrollTo(0, 0); });
+    document.addEventListener('click', e => { if (!e.target.closest('.morewrap')) closeMore(); });
+    $('#layoutToggle').addEventListener('click', () => {
+      LS.set('layout', phone ? 'desktop' : 'phone'); applyLayout();
+      if (current) showCode(current, true); else { $('.split').classList.remove('showing'); }
+      if (lastQuery) doSearch(lastQuery, true);
+    });
+    window.addEventListener('resize', () => { if (!LS.get('layout', '')) { const was = phone; applyLayout(); if (was !== phone && current) showCode(current, true); } });
     $('#tabs').addEventListener('click', e => { const b = e.target.closest('button[data-tab]'); if (!b) return; showTab(b.dataset.tab); history.replaceState(null, '', b.dataset.tab === 'procedures' && current ? '#/code/' + current : '#/' + b.dataset.tab); });
     const q = $('#q'), clr = $('#qclear');
     $('#qform').addEventListener('submit', e => { e.preventDefault(); q.blur(); doSearch(q.value); });
