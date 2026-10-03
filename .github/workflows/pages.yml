@@ -1,0 +1,46 @@
+name: Deploy to GitHub Pages
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Import site bundle (if .deploy/bundle.txt present)
+        run: |
+          set -euo pipefail
+          if [ -f .deploy/bundle.txt ]; then
+            read -r URL SHA < .deploy/bundle.txt
+            curl -sSfL -o /tmp/bundle.tgz "$URL"
+            echo "$SHA  /tmp/bundle.tgz" | sha256sum -c -
+            rm -rf site && mkdir site
+            tar -xzf /tmp/bundle.tgz -C site
+            touch site/.nojekyll
+            git rm -q .deploy/bundle.txt
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A site
+            git commit -m "Import site bundle $SHA"
+            git push
+          fi
+          test -f site/index.html
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4
