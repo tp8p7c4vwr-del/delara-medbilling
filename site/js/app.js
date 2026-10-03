@@ -102,9 +102,6 @@
     wire();
     renderStatic();
     route();
-    if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
-      navigator.serviceWorker.register('sw.js').catch(() => {});
-    }
   }
 
   function skillOptions(sel) {
@@ -740,7 +737,6 @@
   let tt; function toast(t) { const el = $('#toast'); el.textContent = t; el.hidden = false; clearTimeout(tt); tt = setTimeout(() => el.hidden = true, 2200); }
 
   function wire() {
-    $('#homeLink').addEventListener('click', e => { e.preventDefault(); goHome(); });
     $('#tabs').addEventListener('click', e => { const b = e.target.closest('button[data-tab]'); if (!b) return; showTab(b.dataset.tab); history.replaceState(null, '', b.dataset.tab === 'procedures' && current ? '#/code/' + current : '#/' + b.dataset.tab); });
     const q = $('#q'), clr = $('#qclear');
     $('#qform').addEventListener('submit', e => { e.preventDefault(); q.blur(); doSearch(q.value); });
@@ -763,5 +759,21 @@
     });
     wireAI(); wireFeedback();
   }
-  boot().catch(err => { document.body.insertAdjacentHTML('afterbegin', '<p class="pad warn">Could not load data files. Serve this folder over http (e.g. python3 -m http.server).</p>'); console.error(err); });
+  // Home link: bound before data loads. Until the app is ready the plain href="./" reload still lands on home.
+  let ready = false;
+  $('#homeLink').addEventListener('click', e => { if (!ready) return; e.preventDefault(); goHome(); });
+
+  // Service worker: bypass the HTTP cache for sw.js, check for updates on load and when the tab becomes visible,
+  // and reload once when a new version takes control so stale code never lingers.
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
+    const hadController = !!navigator.serviceWorker.controller;
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !reloaded) { reloaded = true; location.reload(); } });
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => {
+      reg.update().catch(() => {});
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); });
+    }).catch(() => {});
+  }
+
+  boot().then(() => { ready = true; }).catch(err => { document.body.insertAdjacentHTML('afterbegin', '<p class="pad warn">Could not load data files. Serve this folder over http (e.g. python3 -m http.server).</p>'); console.error(err); });
 })();
