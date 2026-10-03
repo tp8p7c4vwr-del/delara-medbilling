@@ -104,3 +104,4 @@ body{overflow-x:hidden}
 @media(max-width:520px){.skill span{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}.skill select{max-width:44vw}.brand{font-size:.95rem}}
 .why{color:var(--teal-d)}
 .brand{color:inherit;text-decoration:none;cursor:pointer;border-radius:10px;padding:2px 4px;margin:-2px -4px}.brand:focus-visible{outline:3px solid #fff;outline-offset:2px}
+.brand{touch-action:manipulation;-webkit-tap-highlight-color:rgba(255,255,255,.2);position:relative;z-index:1}
