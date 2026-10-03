@@ -1,4 +1,4 @@
-/* MedFee Desk - app. Static, offline-capable. No analytics, no trackers, no patient data stored. */
+/* MedBilling Fee Desk - app. Static, offline-capable. No analytics, no trackers, no patient data stored. */
 (function () {
   'use strict';
   const $ = (s, el) => (el || document).querySelector(s);
@@ -44,21 +44,21 @@
   const keyToItem = (k, t) => ({ type: k[0] === 'H' ? 'HSC' : 'ICD9', code: k.slice(2), ...(t ? { at: t } : {}) });
   function exportSaved() {
     const now = new Date();
-    const data = { app: 'MedFee Desk', kind: 'favourites', version: 1, exported: now.toISOString(),
+    const data = { app: 'MedBilling Fee Desk', kind: 'favourites', version: 1, exported: now.toISOString(),
       favourites: FAVS.map(k => keyToItem(k, TS.f[k])), recent: RECENT.map(k => keyToItem(k, TS.r[k])) };
     const d = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    const name = `medfee-desk-favourites-${d}.json`, text = JSON.stringify(data, null, 1);
+    const name = `medbilling-fee-desk-favourites-${d}.json`, text = JSON.stringify(data, null, 1);
     const blob = new Blob([text], { type: 'application/json' });
     const download = () => { const u = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = u; a.download = name; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 4000); toast('Exported ' + name); };
     // iPhone/iPad (Safari and home-screen app): the share sheet offers "Save to Files", AirDrop, Mail. Elsewhere: a normal download.
     let file = null; try { file = new File([blob], name, { type: 'application/json' }); } catch (e) {}
     if (phone && file && navigator.canShare && navigator.canShare({ files: [file] })) {
-      navigator.share({ files: [file], title: 'MedFee Desk favourites' }).then(() => toast('Exported ' + name)).catch(err => { if (!err || err.name !== 'AbortError') download(); });
+      navigator.share({ files: [file], title: 'MedBilling Fee Desk favourites' }).then(() => toast('Exported ' + name)).catch(err => { if (!err || err.name !== 'AbortError') download(); });
     } else download();
   }
   function parseImport(text) {
     const o = JSON.parse(text);
-    if (!o || typeof o !== 'object' || (!Array.isArray(o.favourites) && !Array.isArray(o.recent))) throw new Error('not a MedFee Desk favourites file');
+    if (!o || typeof o !== 'object' || (!Array.isArray(o.favourites) && !Array.isArray(o.recent))) throw new Error('not a MedBilling Fee Desk favourites file');
     const conv = arr => (Array.isArray(arr) ? arr : []).map(x => {
       if (!x || typeof x.code !== 'string') return null;
       const code = x.code.trim().toUpperCase(), t = x.type === 'ICD9' ? 'I' : 'H';
@@ -71,7 +71,7 @@
   function importSaved(file) {
     const r = new FileReader();
     r.onload = () => {
-      let p; try { p = parseImport(String(r.result)); } catch (e) { alert('Import failed: this is not a MedFee Desk favourites file.'); return; }
+      let p; try { p = parseImport(String(r.result)); } catch (e) { alert('Import failed: this is not a MedBilling Fee Desk favourites file.'); return; }
       const newFav = [...new Set(p.fav.map(x => x.key))].filter(k => !FAVS.includes(k));
       const skipped = p.skipped - p.fav.length - p.rec.length;
       if (!newFav.length && !p.rec.length) { alert('Nothing to import: all favourites in this file are already saved' + (skipped ? ` (${skipped} unknown code${skipped > 1 ? 's' : ''} skipped)` : '') + '.'); return; }
@@ -710,7 +710,7 @@
       const js = r.journals.filter(o => !o.obgy || skill === 'OBGY' || skill === 'BASE' || !icd);
       return `<div class="region"><h3>${esc(r.name)}</h3><ul>${orgs.map(item).join('')}</ul>${r.local ? `<h4>${esc(r.localLabel || 'Regional and local resources')}</h4><ul>${r.local.map(item).join('')}</ul>` : ''}${r.charities ? `<h4>National Health Charities &amp; Organizations</h4><ul>${r.charities.map(item).join('')}</ul>` : ''}<h4>Journals</h4><ul>${js.map(item).join('')}</ul></div>`;
     }).join('')}
-    <p class="small muted">External links for reference; MedFee Desk is not affiliated. Search links carry only the condition name${icd ? ` ("${esc(term)}")` : ''}.</p>
+    <p class="small muted">External links for reference; MedBilling Fee Desk is not affiliated. Search links carry only the condition name${icd ? ` ("${esc(term)}")` : ''}.</p>
     <p class="small muted">ICD-10/ICD-11 equivalents: no validated crosswalk from the Alberta ICD-9 supplement is bundled; use the WHO ICD-10/11 browsers above.</p>`;
   }
   function wireRegion(root, icd) {
@@ -798,7 +798,7 @@
   function gr(id) { return RULEBY[id] ? `<a href="#/rules/${id}">GR ${id}</a>` : 'GR ' + id; }
   function renderNotes() {
     $('#notes').innerHTML = `<div class="notes">
-    <p class="small muted">Short claim notes written for MedFee Desk from the SOMB effective ${esc(fmtDate(META.sombEffective))}. Fees shown for fee skill ${esc(skill === 'BASE' ? 'base' : skill)}. The governing rule text prevails.</p>
+    <p class="small muted">Short claim notes written for MedBilling Fee Desk from the SOMB effective ${esc(fmtDate(META.sombEffective))}. Fees shown for fee skill ${esc(skill === 'BASE' ? 'base' : skill)}. The governing rule text prevails.</p>
     <div class="card"><h3>Cesarean section and BMI</h3><ul>
       <li>${hsc('86.9C')}; ${hsc('86.9D')}; ${hsc('86.9B')}. Neither 86.9C nor 86.9D may be claimed with 81.29C (HSC note).</li>
       <li>BMI modifier (BMIPRO for the surgeon/assistant, BMIANE/BMI2AN for anaesthesia) adds 25% where the price list lists it: adult BMI ≥ 40 or paediatric &gt; 97th percentile — ${gr('18.1')}.</li>
@@ -858,7 +858,7 @@
     $('#aiList').addEventListener('click', e => {
       const b = e.target.closest('button[data-ai]'); if (!b) return;
       aiPick = AIS.find(a => a.id === b.dataset.ai);
-      $('#aiConfirmText').textContent = `This opens ${aiPick.name} outside MedFee Desk. Do not add patient names, PHN, DOB, chart or claim numbers.`;
+      $('#aiConfirmText').textContent = `This opens ${aiPick.name} outside MedBilling Fee Desk. Do not add patient names, PHN, DOB, chart or claim numbers.`;
       $('#aiList').hidden = true; $('#aiConfirm').hidden = false;
     });
     $('#aiBack').onclick = () => { $('#aiConfirm').hidden = true; $('#aiList').hidden = false; };

@@ -1,6 +1,6 @@
 {
-  "name": "MedFee Desk",
-  "short_name": "MedFee Desk",
+  "name": "MedBilling Fee Desk",
+  "short_name": "Fee Desk",
   "description": "Alberta SOMB billing lookup",
   "start_url": "./index.html",
   "scope": "./",
