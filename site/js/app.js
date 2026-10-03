@@ -598,7 +598,7 @@
     return `${sel}${regs.map(r => {
       const orgs = r.orgs.filter(o => !o.obgy || skill === 'OBGY' || skill === 'BASE' || !icd);
       const js = r.journals.filter(o => !o.obgy || skill === 'OBGY' || skill === 'BASE' || !icd);
-      return `<div class="region"><h3>${esc(r.name)}</h3><ul>${orgs.map(item).join('')}</ul><h4>Journals</h4><ul>${js.map(item).join('')}</ul></div>`;
+      return `<div class="region"><h3>${esc(r.name)}</h3><ul>${orgs.map(item).join('')}</ul>${r.local ? `<h4>${esc(r.localLabel || 'Regional and local resources')}</h4><ul>${r.local.map(item).join('')}</ul>` : ''}${r.charities ? `<h4>National Health Charities &amp; Organizations</h4><ul>${r.charities.map(item).join('')}</ul>` : ''}<h4>Journals</h4><ul>${js.map(item).join('')}</ul></div>`;
     }).join('')}
     <p class="small muted">External links for reference; deLara MedBilling is not affiliated. Search links carry only the condition name${icd ? ` ("${esc(term)}")` : ''}.</p>
     <p class="small muted">ICD-10/ICD-11 equivalents: no validated crosswalk from the Alberta ICD-9 supplement is bundled; use the WHO ICD-10/11 browsers above.</p>`;
