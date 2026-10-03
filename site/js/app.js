@@ -152,6 +152,17 @@
     else showTab('procedures');
   }
   window.addEventListener('hashchange', route);
+  // Home: Procedures tab, search cleared, code detail closed, scrolled to top. Fee skill is kept.
+  function goHome() {
+    current = null; lastQuery = '';
+    const q = $('#q'); q.value = ''; $('#qclear').hidden = true; q.blur();
+    $('#results')._ctx = null; doSearch('');
+    const d = $('#detail'); d.hidden = true; d.innerHTML = ''; d.scrollTop = 0;
+    $$('dialog[open]').forEach(x => x.close());
+    showTab('procedures');
+    if (location.hash) history.pushState(null, '', location.pathname + location.search);
+    window.scrollTo(0, 0);
+  }
 
   // ------------------------------------------------------------ query understanding (local only)
   const PERIOD_CODES = {
@@ -729,6 +740,7 @@
   let tt; function toast(t) { const el = $('#toast'); el.textContent = t; el.hidden = false; clearTimeout(tt); tt = setTimeout(() => el.hidden = true, 2200); }
 
   function wire() {
+    $('#homeLink').addEventListener('click', e => { e.preventDefault(); goHome(); });
     $('#tabs').addEventListener('click', e => { const b = e.target.closest('button[data-tab]'); if (!b) return; showTab(b.dataset.tab); history.replaceState(null, '', b.dataset.tab === 'procedures' && current ? '#/code/' + current : '#/' + b.dataset.tab); });
     const q = $('#q'), clr = $('#qclear');
     $('#qform').addEventListener('submit', e => { e.preventDefault(); q.blur(); doSearch(q.value); });

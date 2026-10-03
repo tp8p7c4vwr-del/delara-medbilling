@@ -1,5 +1,5 @@
 /* Offline cache for deLara MedBilling. Same-origin only; never caches or forwards anything else. */
-const V = 'mb-v2-2026-04-01';
+const V = 'mb-v3-2026-04-01';
 const ASSETS = ['./', 'index.html', 'css/app.css', 'js/search.js', 'js/app.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
   'data/meta.json', 'data/codes.json', 'data/rules.json', 'data/modifiers.json', 'data/explanatory.json',
