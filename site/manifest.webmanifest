@@ -1,6 +1,6 @@
 {
-  "name": "deLara MedBilling",
-  "short_name": "MedBilling",
+  "name": "MedFee Desk",
+  "short_name": "MedFee Desk",
   "description": "Alberta SOMB billing lookup",
   "start_url": "./index.html",
   "scope": "./",

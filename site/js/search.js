@@ -1,4 +1,4 @@
-/* deLara MedBilling - local BM25 + fuzzy + synonym search. Runs entirely in the browser; no network. */
+/* MedFee Desk - local BM25 + fuzzy + synonym search. Runs entirely in the browser; no network. */
 (function (global) {
   'use strict';
   const STOP = new Set('a an and or the of for to in on at by with without from is are be as per any other than this that into its it within each all not may only same when which who over under after before more less than s e g eg etc nec'.split(' '));
