@@ -42,6 +42,8 @@
     <button type="button" class="chip" id="moreBtn" aria-haspopup="true" aria-expanded="false">More ▾</button>
     <div id="moreMenu" class="menu" hidden role="menu">
       <button role="menuitem" data-tab="procedures">Procedures</button>
+      <button role="menuitem" data-saved="fav">★ Favourites</button>
+      <button role="menuitem" data-saved="recent">Recent</button>
       <button role="menuitem" data-tab="icd9">ICD-9</button>
       <button role="menuitem" data-tab="price">Price list</button>
       <button role="menuitem" data-tab="rules">Rules</button>
@@ -81,9 +83,11 @@
       <label><input type="checkbox" id="limitSkill" checked> Limit to fee-skill sections</label>
       <span id="timehint" class="muted"></span>
     </div>
+    <div class="quick"><button type="button" class="chip" data-saved="fav">★ Favourites</button><button type="button" class="chip" data-saved="recent">Recent</button></div>
     <div class="split">
       <div class="list" id="results" aria-live="polite"><p class="muted pad">Search runs on this device only. Nothing you type is sent anywhere.</p></div>
       <article class="detail" id="detail" hidden></article>
+      <input type="file" id="impFile" accept=".json,application/json" hidden aria-label="Import favourites file">
     </div>
   </section>
 

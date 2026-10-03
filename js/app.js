@@ -7,6 +7,88 @@
   const money = n => n == null || isNaN(n) ? '—' : '$' + Number(n).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const LS = { get: (k, d) => { try { const v = localStorage.getItem('mb.' + k); return v == null ? d : v; } catch (e) { return d; } },
                set: (k, v) => { try { localStorage.setItem('mb.' + k, v); } catch (e) {} } };
+  // ---- Favourites and recent codes: kept on this device only (localStorage). Keys are 'H:<HSC>' or 'I:<ICD-9>'.
+  const readList = k => { try { const a = JSON.parse(LS.get(k, '[]')); return Array.isArray(a) ? a.filter(x => typeof x === 'string' && /^[HI]:/.test(x)) : []; } catch (e) { return []; } };
+  let FAVS = readList('favs'), RECENT = readList('recent');
+  const RECENT_MAX = 20;
+  const isFav = key => FAVS.includes(key);
+  // Timestamps (ISO) for export: when each favourite was added and when each recent code was last opened.
+  let TS = (() => { try { const o = JSON.parse(LS.get('savedts', '{}')); return { f: o.f || {}, r: o.r || {} }; } catch (e) { return { f: {}, r: {} }; } })();
+  const saveTS = () => LS.set('savedts', JSON.stringify(TS));
+  const saveLists = () => { LS.set('favs', JSON.stringify(FAVS)); LS.set('recent', JSON.stringify(RECENT)); saveTS(); };
+  // Ask the browser not to evict local data (supported in Chrome, Edge, Firefox, Safari 15.2+). Silent if unsupported or refused.
+  function persistStorage() { try { if (navigator.storage && navigator.storage.persist) navigator.storage.persisted().then(p => p || navigator.storage.persist()).catch(() => {}); } catch (e) {} }
+  function star(key) {
+    const on = isFav(key), lab = on ? 'Remove from favourites' : 'Add to favourites';
+    return `<span class="star${on ? ' on' : ''}" role="button" tabindex="0" data-fav="${esc(key)}" aria-pressed="${on}" aria-label="${lab}" title="${lab}">${on ? '★' : '☆'}</span>`;
+  }
+  function paintStar(el) {
+    const on = isFav(el.dataset.fav), lab = on ? 'Remove from favourites' : 'Add to favourites';
+    el.classList.toggle('on', on); el.textContent = on ? '★' : '☆'; el.setAttribute('aria-pressed', String(on)); el.setAttribute('aria-label', lab); el.title = lab;
+  }
+  function toggleFav(key) {
+    const on = !isFav(key);
+    FAVS = on ? [key].concat(FAVS) : FAVS.filter(k => k !== key);
+    if (on) { TS.f[key] = new Date().toISOString(); persistStorage(); } else delete TS.f[key];
+    saveLists();
+    $$('[data-fav]').forEach(el => { if (el.dataset.fav === key) paintStar(el); });
+    if (!lastQuery && $('#results .savedh')) renderSaved();
+    toast(on ? 'Added to favourites' : 'Removed from favourites');
+  }
+  function addRecent(key) {
+    RECENT = [key].concat(RECENT.filter(k => k !== key)).slice(0, RECENT_MAX);
+    TS.r[key] = new Date().toISOString(); Object.keys(TS.r).forEach(k => { if (!RECENT.includes(k)) delete TS.r[k]; });
+    saveLists();
+  }
+  // ---- Export / import (codes and timestamps only; nothing else leaves the device)
+  const keyToItem = (k, t) => ({ type: k[0] === 'H' ? 'HSC' : 'ICD9', code: k.slice(2), ...(t ? { at: t } : {}) });
+  function exportSaved() {
+    const now = new Date();
+    const data = { app: 'deLara MedBilling', kind: 'favourites', version: 1, exported: now.toISOString(),
+      favourites: FAVS.map(k => keyToItem(k, TS.f[k])), recent: RECENT.map(k => keyToItem(k, TS.r[k])) };
+    const d = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const name = `delara-medbilling-favourites-${d}.json`, text = JSON.stringify(data, null, 1);
+    const blob = new Blob([text], { type: 'application/json' });
+    const download = () => { const u = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = u; a.download = name; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 4000); toast('Exported ' + name); };
+    // iPhone/iPad (Safari and home-screen app): the share sheet offers "Save to Files", AirDrop, Mail. Elsewhere: a normal download.
+    let file = null; try { file = new File([blob], name, { type: 'application/json' }); } catch (e) {}
+    if (phone && file && navigator.canShare && navigator.canShare({ files: [file] })) {
+      navigator.share({ files: [file], title: 'deLara MedBilling favourites' }).then(() => toast('Exported ' + name)).catch(err => { if (!err || err.name !== 'AbortError') download(); });
+    } else download();
+  }
+  function parseImport(text) {
+    const o = JSON.parse(text);
+    if (!o || typeof o !== 'object' || (!Array.isArray(o.favourites) && !Array.isArray(o.recent))) throw new Error('not a deLara MedBilling favourites file');
+    const conv = arr => (Array.isArray(arr) ? arr : []).map(x => {
+      if (!x || typeof x.code !== 'string') return null;
+      const code = x.code.trim().toUpperCase(), t = x.type === 'ICD9' ? 'I' : 'H';
+      if (t === 'H' ? !BYCODE[code] : !ICDBY[code]) return null;
+      const at = typeof x.at === 'string' && !isNaN(Date.parse(x.at)) ? new Date(x.at).toISOString() : null;
+      return { key: t + ':' + code, at };
+    }).filter(Boolean);
+    return { fav: conv(o.favourites), rec: conv(o.recent), skipped: ((o.favourites || []).length + (o.recent || []).length) };
+  }
+  function importSaved(file) {
+    const r = new FileReader();
+    r.onload = () => {
+      let p; try { p = parseImport(String(r.result)); } catch (e) { alert('Import failed: this is not a deLara MedBilling favourites file.'); return; }
+      const newFav = [...new Set(p.fav.map(x => x.key))].filter(k => !FAVS.includes(k));
+      const skipped = p.skipped - p.fav.length - p.rec.length;
+      if (!newFav.length && !p.rec.length) { alert('Nothing to import: all favourites in this file are already saved' + (skipped ? ` (${skipped} unknown code${skipped > 1 ? 's' : ''} skipped)` : '') + '.'); return; }
+      if (!confirm(`Import from ${file.name}?\n\n• ${newFav.length} new favourite${newFav.length === 1 ? '' : 's'} (${p.fav.length - newFav.length} already saved)\n• ${p.rec.length} recent code${p.rec.length === 1 ? '' : 's'} merged, newest kept, max ${RECENT_MAX}` + (skipped ? `\n• ${skipped} unknown code${skipped > 1 ? 's' : ''} skipped` : '') + '\n\nExisting favourites are kept; nothing is deleted.')) return;
+      const now = new Date().toISOString();
+      p.fav.forEach(x => { if (newFav.includes(x.key) && !TS.f[x.key]) TS.f[x.key] = x.at || now; });
+      FAVS = FAVS.concat(newFav);
+      const rmap = {}; RECENT.forEach(k => rmap[k] = TS.r[k] || ''); p.rec.forEach(x => { const t = x.at || ''; if (!(x.key in rmap) || t > rmap[x.key]) rmap[x.key] = t; });
+      const order = Object.keys(rmap).map((k, i) => ({ k, t: rmap[k], i })).sort((a, b) => (b.t > a.t) - (b.t < a.t) || a.i - b.i);
+      RECENT = order.slice(0, RECENT_MAX).map(x => x.k); TS.r = {}; order.slice(0, RECENT_MAX).forEach(x => { if (x.t) TS.r[x.k] = x.t; });
+      saveLists(); persistStorage();
+      if (!lastQuery && $('#results .savedh')) renderSaved();
+      toast(`Imported ${newFav.length} favourite${newFav.length === 1 ? '' : 's'} and ${p.rec.length} recent`);
+    };
+    r.onerror = () => alert('Import failed: the file could not be read.');
+    r.readAsText(file);
+  }
   const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   const fmtDate = iso => { const [y, m, d] = iso.split('-').map(Number); return `${d} ${MONTHS[m - 1]} ${y}`; };
   const shortDate = iso => { const [y, m, d] = iso.split('-').map(Number); return `${d} ${MONTHS[m - 1].slice(0, 3)} ${y}`; };
@@ -113,6 +195,7 @@
     icdIndex = new MBSearch.Index(ICD.map(i => ({ id: i.code, i, fields: { desc: i.desc, block: i.block, excl: '' } })), { desc: 3, block: 0.6 }, { phraseField: 'desc' });
     wire();
     renderStatic();
+    if (!lastQuery) renderSaved();
     route();
   }
 
@@ -134,7 +217,7 @@
     $$('select.skillsel, #skill, #skillChip').forEach(s => s.value = v);
     const ct = $('#skillChipText'); if (ct) ct.textContent = v === 'BASE' ? 'Base' : v;
     $('#limitSkill').disabled = !SKILL_SECTIONS[skill];
-    if (lastQuery) doSearch(lastQuery, true);
+    if (lastQuery) doSearch(lastQuery, true); else renderSaved();
     if (current) showCode(current, true);
     renderPrice(); renderIcdScope();
     const iq = $('#iq').value.trim(); if (iq) icdSearch(iq);
@@ -223,7 +306,7 @@
     lastQuery = q;
     const box = $('#results');
     q = q.trim();
-    if (!q) { box.innerHTML = '<p class="muted pad">Search runs on this device only. Nothing you type is sent anywhere.</p>'; $('#timehint').textContent = ''; return; }
+    if (!q) { renderSaved(); $('#timehint').textContent = ''; return; }
     const ctx = parseContext(q);
     const limit = $('#limitSkill').checked && !!SKILL_SECTIONS[skill];
     let hits;
@@ -245,17 +328,43 @@
     box.innerHTML = hits.map((h, i) => {
       const c = h.doc.c, f = feeFor(c);
       return `<button class="hit${current === c.code ? ' sel' : ''}" data-code="${esc(c.code)}">
-        <div class="row1"><span class="code">${esc(c.display || c.code)}</span><span class="fee">${f.amount == null ? esc(f.label) : money(f.amount)}</span></div>
+        <div class="row1"><span class="lft"><span class="code">${esc(c.display || c.code)}</span>${star('H:' + c.code)}</span><span class="fee">${f.amount == null ? esc(f.label) : money(f.amount)}</span></div>
         <div class="hdesc">${esc(c.desc)}</div>
         <div class="score">#${i + 1} · score ${h.score.toFixed(2)} (${Math.round(100 * h.score / top)}%) · ${esc(f.label)}${c.cat ? ' · cat ' + esc(c.cat) : ''}
         ${c.bulletins && c.bulletins.some(b => !b.superseded) ? ' · <span class="badge b">MED ' + c.bulletins[0].num + '</span>' : ''}</div></button>`;
     }).join('');
     if (ctx.minutes > 30 && /consult/i.test(q) && BYCODE['03.08M'] && !hits.some(h => h.doc.c.code === '03.08M') && (skill === 'OBGY' || skill === 'BASE')) {
       const x = BYCODE['03.08M'];
-      box.insertAdjacentHTML('beforeend', `<button class="hit" data-code="03.08M"><div class="row1"><span class="code">03.08M</span><span class="fee">${money(feeFor(x).amount)}</span></div><div>${esc(x.desc)}</div><div class="score">Time add-on (rule-based, not scored): HSC note — claimable with 03.08A/AZ/B/BZ when the consultation exceeds 30 minutes</div></button>`);
+      box.insertAdjacentHTML('beforeend', `<button class="hit" data-code="03.08M"><div class="row1"><span class="lft"><span class="code">03.08M</span>${star('H:03.08M')}</span><span class="fee">${money(feeFor(x).amount)}</span></div><div>${esc(x.desc)}</div><div class="score">Time add-on (rule-based, not scored): HSC note — claimable with 03.08A/AZ/B/BZ when the consultation exceeds 30 minutes</div></button>`);
     }
     box._ctx = ctx;
     if (!keepSel && window.matchMedia('(min-width:900px)').matches) showCode(hits[0].doc.c.code, true);
+  }
+
+  // ------------------------------------------------------------ favourites / recent view (home screen when the search is empty)
+  function savedRow(key) {
+    const code = key.slice(2);
+    if (key[0] === 'H') {
+      const c = BYCODE[code]; if (!c) return '';
+      const f = feeFor(c);
+      return `<button class="hit${current === c.code ? ' sel' : ''}" data-code="${esc(c.code)}"><div class="row1"><span class="lft"><span class="code">${esc(c.display || c.code)}</span>${star(key)}</span><span class="fee">${f.amount == null ? esc(f.label) : money(f.amount)}</span></div><div class="hdesc">${esc(c.desc)}</div></button>`;
+    }
+    const i = ICDBY[code]; if (!i) return '';
+    return `<button class="hit" data-icd="${esc(i.code)}"><div class="row1"><span class="lft"><span class="code">${esc(i.code)}</span>${star(key)}</span><span class="small muted">ICD-9</span></div><div class="hdesc">${esc(icdLabel(i))}</div></button>`;
+  }
+  function renderSaved() {
+    const box = $('#results'); box._ctx = null;
+    const fav = FAVS.map(savedRow).filter(Boolean).join(''), rec = RECENT.map(savedRow).filter(Boolean).join('');
+    const sk = esc(skill === 'BASE' ? 'base' : skill);
+    box.innerHTML = `<div class="savedh" id="savedFav"><h3>★ Favourites</h3></div>${fav || '<p class="muted small pad">Tap ☆ on any code to keep it here.</p>'}
+      <div class="savedh" id="savedRecent"><h3>Recent</h3>${rec ? '<button type="button" class="linkbtn" id="clearRecent">Clear</button>' : ''}</div>${rec || '<p class="muted small pad">Codes you open appear here (last ' + RECENT_MAX + ').</p>'}
+      <div class="savedtools"><button type="button" class="ghost" id="expSaved">Export</button><button type="button" class="ghost" id="impSaved">Import</button></div>
+      <p class="small muted pad savednote">Saved on this device only. Add to Home Screen on iPhone to keep them safe; use Export to back up or move to another device.</p>
+      <p class="muted small pad">Fees shown for fee skill ${sk}. Search runs on this device only; nothing you type is sent anywhere.</p>`;
+  }
+  function openSaved(which) {
+    goHome();
+    const t = $(which === 'recent' ? '#savedRecent' : '#savedFav'); if (t && which === 'recent') t.scrollIntoView({ block: 'start' });
   }
 
   // ------------------------------------------------------------ code detail
@@ -272,6 +381,7 @@
   function showCode(code, quiet) {
     const c = BYCODE[code]; if (!c) return;
     current = code;
+    if (!quiet) addRecent('H:' + code);
     $$('.hit').forEach(b => b.classList.toggle('sel', b.dataset.code === code));
     const ctx = ($('#results')._ctx) || { periods: [] };
     const f = feeFor(c);
@@ -302,7 +412,7 @@
     $('.split').classList.remove('showing');
     el.innerHTML = `
       <div class="mobileskill">Fee skill <select class="skillsel" aria-label="Fee skill"></select></div>
-      <div class="row1"><span class="code codebig">${esc(c.display || c.code)}</span>
+      <div class="row1"><span class="code codebig">${esc(c.display || c.code)}</span>${star('H:' + c.code)}
         ${c.cat ? `<span class="badge">cat ${esc(c.cat)}</span>` : ''}${c.visit ? '<span class="badge">V</span>' : ''}${c.notInPriceList ? '<span class="badge b">not in price list</span>' : ''}</div>
       <h2>${esc(c.desc)}</h2>
       <div class="small muted">${esc([c.section, c.chapter, c.sub, c.group].filter(Boolean).join(' › '))}</div>
@@ -337,7 +447,7 @@
   function phoneCard(c, f, call, docLinks, el) {
     el.innerHTML = `<div class="pcard">
       <button type="button" class="ghost back" id="pBack">‹ Results</button>
-      <div class="row1"><span class="code codebig">${esc(c.display || c.code)}</span>${c.cat ? `<span class="badge">cat ${esc(c.cat)}</span>` : ''}</div>
+      <div class="row1"><span class="code codebig">${esc(c.display || c.code)}</span>${star('H:' + c.code)}${c.cat ? `<span class="badge">cat ${esc(c.cat)}</span>` : ''}</div>
       <h2>${esc(c.desc)}</h2>
       <div class="pfee"><div class="fee big">${f.amount == null ? esc(f.label) : money(f.amount)}</div>
         <div class="small muted">Schedule fee (${esc(skill === 'BASE' ? 'base' : skill)})${skill !== 'BASE' && f.amount !== c.base && !c.byAssess ? ' · base ' + money(c.base) : ''}${c.ane != null ? ' · anaesthetic ' + money(c.ane) + ' (separate)' : ''}</div></div>
@@ -355,7 +465,7 @@
     $('#pMore').onclick = () => pickedIcd && showMedRes(pickedIcd);
     $('#pDoc').onclick = () => { const d = $('#pDocs'); d.hidden = !d.hidden; $('#pDoc').setAttribute('aria-expanded', String(!d.hidden)); };
     $('#askCode').onclick = () => openAI(codePrompt(c));
-    $('#pBack').onclick = () => { current = null; el.hidden = true; el.innerHTML = ''; $('.split').classList.remove('showing'); $$('.hit').forEach(b => b.classList.remove('sel')); history.replaceState(null, '', location.pathname + location.search); window.scrollTo(0, 0); };
+    $('#pBack').onclick = () => { current = null; el.hidden = true; el.innerHTML = ''; $('.split').classList.remove('showing'); $$('.hit').forEach(b => b.classList.remove('sel')); if (!lastQuery) renderSaved(); history.replaceState(null, '', location.pathname + location.search); window.scrollTo(0, 0); };
     $('.split').classList.add('showing');
     window.scrollTo(0, 0);
     if (location.hash !== '#/code/' + c.code) history.replaceState(null, '', '#/code/' + c.code);
@@ -560,7 +670,7 @@
     if (!rows.length) { el.innerHTML = '<p class="muted small">' + esc(emptyMsg || 'No ICD-9 suggestions in this scope.') + '</p>'; return; }
     el.innerHTML = rows.map(r => `<div class="icdrow" data-icd="${esc(r.i.code)}"><div><span class="code">${esc(r.i.code)}</span> ${esc(icdLabel(r.i))}
       <div class="small muted">${esc(r.i.block || '')}${r.score != null ? ' · score ' + r.score.toFixed(2) : (r.why ? ' · key match' : '')}</div>${r.why ? `<div class="small why">Why suggested: ${esc(r.why)}</div>` : ''}</div>
-      <div class="btns"><button class="ghost" data-copy="${esc(r.i.code)}">Copy</button><button class="ghost" data-medres="${esc(r.i.code)}">More about this condition</button></div></div>`).join('');
+      <div class="btns">${star('I:' + r.i.code)}<button class="ghost" data-copy="${esc(r.i.code)}">Copy</button><button class="ghost" data-medres="${esc(r.i.code)}">More about this condition</button></div></div>`).join('');
   }
   function icdSearch(q) {
     const el = $('#icdresults');
@@ -636,9 +746,10 @@
   }
   function showMedRes(code) {
     const i = ICDBY[code]; if (!i) return;
+    addRecent('I:' + code);
     let sec = $('#tab-medres');
     if (!sec) { sec = document.createElement('section'); sec.id = 'tab-medres'; sec.className = 'tab'; $('#main').appendChild(sec); }
-    sec.innerHTML = `<div class="condhead"><div class="small muted">Medical resources</div><h2><span class="code">${esc(i.code)}</span> ${esc(icdLabel(i))}</h2>
+    sec.innerHTML = `<div class="condhead"><div class="small muted">Medical resources</div><h2><span class="code">${esc(i.code)}</span>${star('I:' + i.code)} ${esc(icdLabel(i))}</h2>
       <div class="small muted">${esc(i.block || '')}${i.excl ? ' · ' + esc(i.excl) : ''}</div>
       <div class="row mt8"><button class="ghost" data-copy="${esc(i.code)}">Copy ICD-9</button><button class="ghost" id="medBack">Back</button></div></div>` + topSourcesHtml(i) + resourcesHtml(i);
     wireRegion(sec, i);
@@ -656,7 +767,7 @@
     const show = rows.slice(0, 300);
     $('#pricelist').innerHTML = `<p class="small muted pad">${rows.length.toLocaleString()} of ${CODES.length.toLocaleString()} HSCs${rows.length > 300 ? ' (first 300 shown; refine the filter)' : ''}. Fee column uses fee skill ${esc(skill === 'BASE' ? 'base' : skill)}.</p>
       <table><thead><tr><th>HSC</th><th>Description</th><th>Base</th><th>${esc(skill === 'BASE' ? 'Fee' : skill)}</th><th>ANE</th><th>Cat</th></tr></thead><tbody>
-      ${show.map(c => { const fe = feeFor(c); return `<tr><td><a class="code" href="#/code/${esc(c.code)}">${esc(c.display || c.code)}</a></td><td>${esc(c.desc)}</td><td>${c.byAssess ? 'By assess' : money(c.base)}</td><td class="fee">${fe.amount == null ? '—' : money(fe.amount)}</td><td>${c.ane != null ? money(c.ane) : ''}</td><td>${esc(c.cat || '')}</td></tr>`; }).join('')}
+      ${show.map(c => { const fe = feeFor(c); return `<tr><td class="nowrap">${star('H:' + c.code)}<a class="code" href="#/code/${esc(c.code)}">${esc(c.display || c.code)}</a></td><td>${esc(c.desc)}</td><td>${c.byAssess ? 'By assess' : money(c.base)}</td><td class="fee">${fe.amount == null ? '—' : money(fe.amount)}</td><td>${c.ane != null ? money(c.ane) : ''}</td><td>${esc(c.cat || '')}</td></tr>`; }).join('')}
       </tbody></table>`;
   }
   function renderRules() {
@@ -828,7 +939,16 @@
     q.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); q.blur(); doSearch(q.value); } });
     clr.addEventListener('click', () => { q.value = ''; clr.hidden = true; doSearch(''); q.focus(); });
     $('#limitSkill').addEventListener('change', () => lastQuery && doSearch(lastQuery, true));
-    $('#results').addEventListener('click', e => { const b = e.target.closest('.hit'); if (b) showCode(b.dataset.code); });
+    $('#results').addEventListener('click', e => {
+      if (e.target.closest('#clearRecent')) { RECENT = []; TS.r = {}; saveLists(); renderSaved(); toast('Recent codes cleared'); return; }
+      if (e.target.closest('#expSaved')) { exportSaved(); return; }
+      if (e.target.closest('#impSaved')) { const f = $('#impFile'); f.value = ''; f.click(); return; }
+      const b = e.target.closest('.hit'); if (!b) return;
+      if (b.dataset.icd) showMedRes(b.dataset.icd); else showCode(b.dataset.code);
+    });
+    $('#impFile').addEventListener('change', e => { const f = e.target.files && e.target.files[0]; if (f) importSaved(f); });
+    if (FAVS.length) persistStorage();
+    $$('[data-saved]').forEach(b => b.addEventListener('click', () => { closeMore(); openSaved(b.dataset.saved); }));
     $('#askGeneral').onclick = () => openAI(generalPrompt());
     const iq = $('#iq'), icl = $('#iclear');
     $('#iform').addEventListener('submit', e => { e.preventDefault(); iq.blur(); icdSearch(iq.value); });
@@ -843,6 +963,9 @@
     });
     wireAI(); wireFeedback();
   }
+  // Star toggles run in the capture phase so a tap never opens the row, card or link underneath.
+  document.addEventListener('click', e => { const s = e.target.closest && e.target.closest('[data-fav]'); if (!s) return; e.preventDefault(); e.stopPropagation(); if (ready) toggleFav(s.dataset.fav); }, true);
+  document.addEventListener('keydown', e => { const s = e.target.closest && e.target.closest('[data-fav]'); if (!s || (e.key !== 'Enter' && e.key !== ' ')) return; e.preventDefault(); e.stopPropagation(); if (ready) toggleFav(s.dataset.fav); }, true);
   // Home link: bound before data loads. Until the app is ready the plain href="./" reload still lands on home.
   let ready = false;
   $('#homeLink').addEventListener('click', e => { if (!ready) return; e.preventDefault(); goHome(); });
