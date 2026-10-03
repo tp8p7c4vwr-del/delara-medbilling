@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://api.web3forms.com; form-action https://api.web3forms.com; manifest-src 'self'; worker-src 'self'; base-uri 'self'">
+<meta name="referrer" content="no-referrer">
+<title>deLara MedBilling</title>
+<meta name="description" content="Private Alberta SOMB billing lookup: health service codes, fees by fee skill, modifiers, governing rules and ICD-9 codes.">
+<meta name="theme-color" content="#0f766e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="MedBilling">
+<meta property="og:title" content="deLara MedBilling">
+<meta property="og:description" content="Alberta SOMB billing lookup for physicians.">
+<meta property="og:image" content="https://tp8p7c4vwr-del.github.io/delara-medbilling/og.jpg">
+<meta property="og:url" content="https://tp8p7c4vwr-del.github.io/delara-medbilling/">
+<meta property="og:type" content="website">
+<meta name="twitter:image" content="https://tp8p7c4vwr-del.github.io/delara-medbilling/og.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png" sizes="192x192">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <img src="icons/icon-192.png" alt="" width="32" height="32">
+    <span class="title">deLara MedBilling</span>
+  </div>
+  <label class="skill">
+    <span>Fee skill</span>
+    <select id="skill" aria-label="Fee skill (SKLL)"></select>
+  </label>
+</header>
+<nav class="tabs" id="tabs" role="tablist">
+  <button data-tab="procedures" class="on">Procedures</button>
+  <button data-tab="price">Price list</button>
+  <button data-tab="rules">Rules</button>
+  <button data-tab="modifiers">Modifiers</button>
+  <button data-tab="explanatory">Explanatory</button>
+  <button data-tab="icd9">ICD-9</button>
+  <button data-tab="bulletins">Bulletins</button>
+  <button data-tab="notes">Claim notes</button>
+  <button data-tab="resources">Resources</button>
+</nav>
+
+<main id="main">
+  <!-- Procedures -->
+  <section id="tab-procedures" class="tab on">
+    <form id="qform" class="searchbar" autocomplete="off" role="search">
+      <div class="inputwrap">
+        <input id="q" type="search" enterkeyhint="search" inputmode="search" autocapitalize="off" spellcheck="false"
+               placeholder="Describe the service or enter an HSC" aria-label="Procedure description">
+        <button type="button" id="qclear" class="clear" aria-label="Clear search" hidden>&times;</button>
+      </div>
+      <button type="submit" class="primary">Search</button>
+      <button type="button" class="ghost" id="askGeneral">Ask AI</button>
+    </form>
+    <div class="opts">
+      <label><input type="checkbox" id="limitSkill" checked> Limit to fee-skill sections</label>
+      <span id="timehint" class="muted"></span>
+    </div>
+    <div class="split">
+      <div class="list" id="results" aria-live="polite"><p class="muted pad">Search runs on this device only. Nothing you type is sent anywhere.</p></div>
+      <article class="detail" id="detail" hidden></article>
+    </div>
+  </section>
+
+  <section id="tab-price" class="tab">
+    <div class="searchbar"><div class="inputwrap"><input id="pf" type="search" enterkeyhint="search" placeholder="Filter by HSC, word or section"></div></div>
+    <div id="pricelist" class="tablewrap"></div>
+  </section>
+
+  <section id="tab-rules" class="tab">
+    <div class="searchbar"><div class="inputwrap"><input id="rf" type="search" enterkeyhint="search" placeholder="Filter governing rules (e.g. 4.6, callback, BMI)"></div></div>
+    <div id="rules"></div>
+  </section>
+
+  <section id="tab-modifiers" class="tab">
+    <div class="searchbar"><div class="inputwrap"><input id="mf" type="search" enterkeyhint="search" placeholder="Filter modifiers (e.g. SURC, CMGP, BMI)"></div></div>
+    <div id="modifiers"></div>
+  </section>
+
+  <section id="tab-explanatory" class="tab">
+    <div class="searchbar"><div class="inputwrap"><input id="ef" type="search" enterkeyhint="search" placeholder="Filter explanatory codes"></div></div>
+    <div id="explanatory"></div>
+  </section>
+
+  <section id="tab-icd9" class="tab">
+    <form id="iform" class="searchbar" autocomplete="off">
+      <div class="inputwrap">
+        <input id="iq" type="search" enterkeyhint="search" placeholder="Search ICD-9 (e.g. pre-eclampsia, 618.0, V22)">
+        <button type="button" id="iclear" class="clear" aria-label="Clear" hidden>&times;</button>
+      </div>
+      <button type="submit" class="primary">Search</button>
+    </form>
+    <p class="muted small" id="icdscope"></p>
+    <div id="icdresults"></div>
+  </section>
+
+  <section id="tab-bulletins" class="tab"><div id="bulletins"></div></section>
+  <section id="tab-notes" class="tab"><div id="notes"></div></section>
+
+  <section id="tab-resources" class="tab">
+    <div id="resources"></div>
+  </section>
+</main>
+
+<footer class="foot">
+  <p id="dataline" class="dataline">Data: SOMB effective …, source alberta.ca</p>
+  <p class="disclaimer">Reference only; verify against the current SOMB before submitting claims.</p>
+  <p class="small muted">External links for reference; deLara MedBilling is not affiliated.</p>
+  <p class="small muted">No patient data is stored. No analytics or trackers. Search runs on this device.</p>
+  <details class="feedback">
+    <summary>Suggest a change</summary>
+    <form id="fb" novalidate>
+      <p class="warn small">Do not include patient names, PHN, DOB, chart or claim numbers.</p>
+      <input type="hidden" name="access_key" value="60e64aa8-fc33-4b85-9742-2a973a88369e">
+      <input type="hidden" name="subject" value="deLara MedBilling feedback">
+      <input type="checkbox" name="botcheck" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true">
+      <label>Your email (optional)<input type="email" name="email" autocomplete="email"></label>
+      <label>Suggestion<textarea name="message" rows="4" required></textarea></label>
+      <button type="submit" class="primary">Send</button>
+      <p id="fbmsg" class="small" role="status"></p>
+    </form>
+  </details>
+  <div class="copyright">© 2026 deLara MedBilling. All rights reserved. This app is protected by copyright. Reproduction or duplication without permission is an infringement.</div>
+</footer>
+
+<dialog id="aiDialog">
+  <form method="dialog" class="dlg">
+    <h3>Ask AI</h3>
+    <p class="small muted">Opens an outside AI site; you sign in with your own account. Do not include patient details.</p>
+    <pre id="aiPrompt" class="prompt"></pre>
+    <div id="aiList" class="ailist"></div>
+    <div id="aiConfirm" class="confirm" hidden>
+      <p id="aiConfirmText"></p>
+      <div class="row"><button type="button" id="aiGo" class="primary">Open</button><button type="button" id="aiBack" class="ghost">Back</button></div>
+    </div>
+    <p id="aiMsg" class="small"></p>
+    <div class="row end"><button value="close" class="ghost">Close</button></div>
+  </form>
+</dialog>
+<div id="toast" class="toast" hidden></div>
+<script src="js/search.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
