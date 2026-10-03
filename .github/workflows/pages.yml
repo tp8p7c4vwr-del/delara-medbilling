@@ -1,26 +1,25 @@
-name: Deploy to GitHub Pages
+name: Publish site to gh-pages
 on:
   push:
     branches: [main]
   workflow_dispatch:
 permissions:
   contents: write
-  pages: write
-  id-token: write
 concurrency:
   group: pages
   cancel-in-progress: false
 jobs:
-  deploy:
+  publish:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Import site bundle (if .deploy/bundle.txt present)
         run: |
           set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           if [ -f .deploy/bundle.txt ]; then
             read -r URL SHA < .deploy/bundle.txt
             curl -sSfL -o /tmp/bundle.tgz "$URL"
@@ -29,18 +28,18 @@ jobs:
             tar -xzf /tmp/bundle.tgz -C site
             touch site/.nojekyll
             git rm -q .deploy/bundle.txt
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add -A site
             git commit -m "Import site bundle $SHA"
-            git push
+            git push origin HEAD:main
           fi
           test -f site/index.html
-      - uses: actions/configure-pages@v5
-        with:
-          enablement: true
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Push site/ to pages-src and gh-pages branches
+        run: |
+          set -euo pipefail
+          touch site/.nojekyll
+          git add -A site && (git diff --cached --quiet || (git commit -m "Add .nojekyll" && git push origin HEAD:main))
+          git subtree split --prefix site -b pages-tmp
+          git push -f origin pages-tmp:refs/heads/pages-src
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null; then
+            git push -f origin pages-tmp:refs/heads/gh-pages
+          fi
