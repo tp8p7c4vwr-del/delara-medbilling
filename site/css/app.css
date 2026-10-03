@@ -102,3 +102,4 @@ body{overflow-x:hidden}
 .mobileskill select{flex:1;min-width:0;max-width:100%}
 .mobileskill label,.mobileskill>span{white-space:nowrap;overflow-wrap:normal;flex:none}.mobileskill select{width:100%;box-sizing:border-box}
 @media(max-width:520px){.skill span{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}.skill select{max-width:44vw}.brand{font-size:.95rem}}
+.why{color:var(--teal-d)}
