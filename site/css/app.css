@@ -105,3 +105,47 @@ body{overflow-x:hidden}
 .why{color:var(--teal-d)}
 .brand{color:inherit;text-decoration:none;cursor:pointer;border-radius:10px;padding:2px 4px;margin:-2px -4px}.brand:focus-visible{outline:3px solid #fff;outline-offset:2px}
 .brand{touch-action:manipulation;-webkit-tap-highlight-color:rgba(255,255,255,.2);position:relative;z-index:1}
+.topsrc{background:var(--card);border-radius:var(--r);padding:12px 14px;margin:10px 0}
+.topgrid{display:grid;grid-template-columns:1fr;gap:4px 24px}@media(min-width:760px){.topgrid{grid-template-columns:1fr 1fr}}
+.topsrc ol{margin:.3em 0 .6em;padding-left:1.6em}.topsrc li{margin:.25em 0}.topsrc h4{margin:.6em 0 .2em}
+.badge.sub{display:inline-block;font-size:.7rem;padding:0 6px;border-radius:8px;background:#fde7d2;color:#9a3412;margin-left:4px}
+/* ---------------- Phone / tablet mode ---------------- */
+.layoutlink{background:transparent;border:1px solid rgba(255,255,255,.55);color:#fff;border-radius:999px;padding:4px 10px;font-size:.8rem;cursor:pointer;white-space:nowrap}
+.layoutlink:focus-visible{outline:3px solid #fff;outline-offset:2px}
+.phonenav{display:none}
+html.phone .tabs,html.phone .top .skill,html.phone #askGeneral,html.phone .opts label,html.phone .mobileskill{display:none!important}
+html.phone .top{padding-top:calc(10px + env(safe-area-inset-top));padding-bottom:10px}
+html.phone .phonenav{display:flex;align-items:center;justify-content:space-between;gap:8px;max-width:1200px;margin:0 auto;padding:10px 12px 0}
+.chip{position:relative;display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:999px;padding:6px 12px;font-size:.9rem;cursor:pointer;min-height:36px}
+.skillchip select{position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer;font-size:16px}
+.morewrap{position:relative}
+.menu{position:absolute;right:0;top:calc(100% + 6px);z-index:30;background:#fff;border-radius:12px;box-shadow:0 8px 24px rgba(15,23,42,.18);padding:6px;min-width:190px;display:flex;flex-direction:column}
+.menu[hidden]{display:none}
+.menu button{background:none;border:0;text-align:left;padding:11px 12px;border-radius:8px;font-size:1rem;color:var(--ink);cursor:pointer}
+.menu button.on{background:#e6f3f2;color:var(--teal-d);font-weight:600}
+html.phone .searchbar{gap:8px}
+html.phone #q{font-size:17px;padding:14px 44px 14px 14px;border-radius:14px}
+html.phone .searchbar .primary{display:none}
+html.phone .opts{min-height:0;margin:4px 2px}
+html.phone .hit .score{display:none}
+html.phone .hit{padding:12px 14px}
+html.phone .hit .hdesc{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;color:var(--ink)}
+html.phone .split.showing #results{display:none}
+html.phone .detail{position:static;max-height:none;overflow:visible}
+.pcard .back{margin-bottom:8px}
+.pfee{background:#f6f8fa;border-radius:12px;padding:12px 14px;margin:10px 0}
+.pbtns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0}
+.pbtns #pMore{grid-column:1 / -1}
+.pbtns button{min-height:44px}
+.pcard details{margin:8px 0;border-top:1px solid var(--line);padding-top:6px}
+.pcard summary{cursor:pointer;font-weight:600;color:var(--teal-d);padding:6px 0}
+.pcard #pDocs{display:flex;flex-direction:column;gap:6px;margin:6px 0 10px}
+.pcard #pDocs[hidden]{display:none}
+html.phone .picklist .icdrow{cursor:pointer;border-radius:10px;padding:8px}
+html.phone .picklist .icdrow.picked{background:#e6f3f2;outline:2px solid var(--teal)}
+html.phone .picklist [data-medres]{display:none}
+html.phone .foot .dataline,html.phone .foot .disclaimer,html.phone .foot>p.small{display:none}
+html.phone .foot{text-align:center}
+html.phone .feedback summary{color:var(--teal-d);text-decoration:underline;cursor:pointer;list-style:none}
+@media(min-width:700px){html.phone main{max-width:760px}}
+.pfee .fee.big{font-size:2rem;font-weight:700;line-height:1.1}html.phone .picklist .why,html.phone .picklist .icdrow .small.muted{display:none}
