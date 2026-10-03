@@ -149,3 +149,14 @@ html.phone .foot{text-align:center}
 html.phone .feedback summary{color:var(--teal-d);text-decoration:underline;cursor:pointer;list-style:none}
 @media(min-width:700px){html.phone main{max-width:760px}}
 .pfee .fee.big{font-size:2rem;font-weight:700;line-height:1.1}html.phone .picklist .why,html.phone .picklist .icdrow .small.muted{display:none}
+
+.star{display:inline-flex;align-items:center;justify-content:center;min-width:30px;min-height:30px;padding:0 2px;font-size:1.2rem;line-height:1;color:#94a3b8;cursor:pointer;border-radius:8px;user-select:none;-webkit-user-select:none;touch-action:manipulation;-webkit-tap-highlight-color:transparent;vertical-align:middle}
+.star.on{color:#d97706}@media (hover:hover){.star:hover{background:rgba(15,118,110,.08)}}.star:focus-visible{outline:2px solid var(--teal);outline-offset:1px}
+.codebig+.star{font-size:1.5rem;min-width:40px;min-height:40px}
+.hit .lft{display:inline-flex;align-items:center;gap:2px}
+.quick{display:flex;gap:8px;flex-wrap:wrap;margin:2px 2px 10px}
+.savedh{display:flex;justify-content:space-between;align-items:center;margin:8px 4px 0}.savedh h3{margin:0;font-size:1rem}
+.linkbtn{background:none;border:0;color:var(--teal);text-decoration:underline;cursor:pointer;font:inherit;font-size:.88rem;padding:6px}
+td.nowrap{white-space:nowrap}
+#moreMenu button[data-saved]{font-weight:600}
+.savedtools{display:flex;gap:8px;margin:12px 4px 0}.savednote{margin-top:6px}
