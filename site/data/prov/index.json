@@ -1,5 +1,5 @@
 {
- "built": "2026-10-03T20:03:58-06:00",
+ "built": "2026-10-03T20:08:19-06:00",
  "list": [
   {
    "id": "AB",
@@ -122,11 +122,17 @@
    "id": "NT",
    "name": "Northwest Territories",
    "group": "terr",
-   "status": "soon",
-   "message": "Coming soon - being prepared",
-   "why": "Parsing and spot-checking of the official schedule is in progress.",
-   "link": "https://www.hss.gov.nt.ca/sites/hss/files/resources/insured-services-tariff.pdf",
-   "linkLabel": "Insured Services Tariff"
+   "status": "live",
+   "file": "NT.json",
+   "effective": "2025-04-01",
+   "effectiveLabel": "Effective 1 April 2025",
+   "counts": {
+    "rows": 1463,
+    "codes": 1463,
+    "skipped": 2
+   },
+   "link": "https://www.hss.gov.nt.ca/en/services/nwt-health-care-plan/physician-services",
+   "linkLabel": "Insured Services Tariff (physicians)"
   },
   {
    "id": "NU",
