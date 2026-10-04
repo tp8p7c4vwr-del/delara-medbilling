@@ -160,3 +160,24 @@ html.phone .feedback summary{color:var(--teal-d);text-decoration:underline;curso
 td.nowrap{white-space:nowrap}
 #moreMenu button[data-saved]{font-weight:600}
 .savedtools{display:flex;gap:8px;margin:12px 4px 0}.savednote{margin-top:6px}
+
+/* provinces and territories */
+.jur{display:flex;align-items:center;gap:6px;font-size:.8rem;margin-left:auto}
+.jur span{opacity:.85}
+.jur select{max-width:40vw;padding:6px 8px;border-radius:8px;border:0;background:#fff;color:var(--ink);font-size:.9rem;font-weight:600}
+@media(max-width:520px){.jur span{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}.jur select{max-width:46vw}}
+html.phone .top .jur{display:none}
+.jurchip{display:none}html.phone .jurchip{display:inline-flex;font-weight:600}
+.jurchip select{position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer;font-size:16px}
+html.phone .phonenav .skillchip{flex:1 1 auto;min-width:0;overflow:hidden}html.phone .phonenav .skillchip b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+html.jur-x .abonly,html.jur-soon .needdata,html.noskill .skill,html.noskill .skillchip,html.jur-x .opts label{display:none!important}
+.jurbar{max-width:1200px;margin:8px auto 0;padding:8px 12px;background:var(--card);border-left:4px solid var(--teal);border-radius:8px;font-size:.9rem}
+.jurbar .eff,.eff{font-weight:700;color:var(--teal)}
+.badge.j{background:#e0f2f1;color:#0f5f58}
+.hit.other{opacity:.92;border-style:dashed}
+.card.soon h2{margin:.2em 0}
+.srcnote{margin:8px 0;padding:8px 10px;border-top:1px solid rgba(0,0,0,.08)}
+.srcnote p,.srccard p{margin:.25em 0}
+.srcmini{margin-top:14px}
+.rule.rh{margin-top:12px}
+.morewrap{flex:0 0 auto}#moreBtn{white-space:nowrap}

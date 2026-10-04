@@ -1,0 +1,136 @@
+{
+ "built": "2026-10-03T19:20:13-06:00",
+ "list": [
+  {
+   "id": "AB",
+   "name": "Alberta",
+   "group": "prov",
+   "status": "live"
+  },
+  {
+   "id": "BC",
+   "name": "British Columbia",
+   "group": "prov",
+   "status": "soon",
+   "message": "Coming soon - awaiting permission to republish the official schedule",
+   "why": "The Province of British Columbia does not permit reproduction or redistribution of the MSC Payment Schedule without written permission.",
+   "link": "https://www2.gov.bc.ca/gov/content/health/practitioner-professional-resources/msp/physicians/payment-schedules/msc-payment-schedule",
+   "linkLabel": "MSC Payment Schedule (gov.bc.ca)"
+  },
+  {
+   "id": "MB",
+   "name": "Manitoba",
+   "group": "prov",
+   "status": "live",
+   "file": "MB.json",
+   "effective": "2026-10-01",
+   "effectiveLabel": "Updated 1 October 2026",
+   "counts": {
+    "rows": 4632,
+    "codes": 3825
+   },
+   "link": "https://www.manitoba.ca/health/manual/index.html",
+   "linkLabel": "Physician's Manual"
+  },
+  {
+   "id": "NB",
+   "name": "New Brunswick",
+   "group": "prov",
+   "status": "soon",
+   "message": "Coming soon - being prepared",
+   "why": "Parsing and spot-checking of the official schedule is in progress.",
+   "link": "https://www2.gnb.ca/content/dam/gnb/Departments/h-s/pdf/en/Physicians/new_brunswick_physicians_manual.pdf",
+   "linkLabel": "New Brunswick Physicians' Manual"
+  },
+  {
+   "id": "NL",
+   "name": "Newfoundland and Labrador",
+   "group": "prov",
+   "status": "soon",
+   "message": "Coming soon - being prepared",
+   "why": "Parsing and spot-checking of the official schedule is in progress.",
+   "link": "https://www.gov.nl.ca/hcs/files/Medical-Payment-Schedule-October-1-2026.pdf",
+   "linkLabel": "MCP Medical Payment Schedule"
+  },
+  {
+   "id": "NS",
+   "name": "Nova Scotia",
+   "group": "prov",
+   "status": "soon",
+   "message": "Coming soon - being prepared",
+   "why": "Parsing and spot-checking of the official schedule is in progress.",
+   "link": "https://msi.medavie.bluecross.ca/physicians-manual/",
+   "linkLabel": "MSI Physician's Manual"
+  },
+  {
+   "id": "ON",
+   "name": "Ontario",
+   "group": "prov",
+   "status": "soon",
+   "message": "Coming soon - awaiting permission to republish the official schedule",
+   "why": "Ontario permits non-commercial reproduction of the Schedule of Benefits only without changes; a searchable re-presentation needs permission (copyright@ontario.ca).",
+   "link": "https://www.ontario.ca/page/ohip-schedule-benefits-and-fees",
+   "linkLabel": "OHIP Schedule of Benefits and Fees (ontario.ca)"
+  },
+  {
+   "id": "PE",
+   "name": "Prince Edward Island",
+   "group": "prov",
+   "status": "soon",
+   "message": "Coming soon - being prepared",
+   "why": "Parsing and spot-checking of the official schedule is in progress.",
+   "link": "https://www.princeedwardisland.ca/sites/default/files/publications/physician_services_agreement_2024-2029.pdf",
+   "linkLabel": "Physician Services Agreement 2024-2029"
+  },
+  {
+   "id": "QC",
+   "name": "Quebec",
+   "group": "prov",
+   "status": "soon",
+   "message": "Coming soon - awaiting permission to republish the official schedule",
+   "why": "Reproduction of the RAMQ manuals requires authorization from the Government of Québec.",
+   "link": "https://www.ramq.gouv.qc.ca/fr/professionnels/medecins-specialistes/manuels/Pages/remuneration-acte.aspx",
+   "linkLabel": "RAMQ manuals: rémunération à l'acte (ramq.gouv.qc.ca)"
+  },
+  {
+   "id": "SK",
+   "name": "Saskatchewan",
+   "group": "prov",
+   "status": "soon",
+   "message": "Coming soon - being prepared",
+   "why": "Parsing and spot-checking of the official schedule is in progress.",
+   "link": "https://www.saskatchewan.ca/business/health-care-administration-and-provider-resources/saskatchewan-health-insurance-plan-information-for-providers/payment-schedule-for-insured-services-provided-by-a-physician",
+   "linkLabel": "Payment Schedule for Insured Services Provided by a Physician"
+  },
+  {
+   "id": "NT",
+   "name": "Northwest Territories",
+   "group": "terr",
+   "status": "soon",
+   "message": "Coming soon - being prepared",
+   "why": "Parsing and spot-checking of the official schedule is in progress.",
+   "link": "https://www.hss.gov.nt.ca/sites/hss/files/resources/insured-services-tariff.pdf",
+   "linkLabel": "Insured Services Tariff"
+  },
+  {
+   "id": "NU",
+   "name": "Nunavut",
+   "group": "terr",
+   "status": "none",
+   "message": "No current published schedule",
+   "why": "Nunavut has no current published physician fee schedule. The fee schedule in the Medical Care Regulations (consolidated) carries values from the 1990s.",
+   "link": "https://www.nunavutlegislation.ca/en/file-download/download/public/4785",
+   "linkLabel": "Medical Care Regulations, consolidation (nunavutlegislation.ca, PDF)"
+  },
+  {
+   "id": "YT",
+   "name": "Yukon",
+   "group": "terr",
+   "status": "soon",
+   "message": "Coming soon - being prepared",
+   "why": "Parsing and spot-checking of the official schedule is in progress.",
+   "link": "https://apps.gov.yk.ca/physicianresources/f?p=271:9000",
+   "linkLabel": "Yukon Physician Fee Guide"
+  }
+ ]
+}
