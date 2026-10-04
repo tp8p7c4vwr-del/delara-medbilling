@@ -197,7 +197,7 @@
     'Digestive System': 'X', 'Hemic and Lymphatic Systems': 'IX', 'Cardiovascular System': 'VIII', 'Respiratory System': 'VII', 'Ocular System': 'IV',
     'Audio-Vestibular System': 'V', 'Nervous System': 'II', 'Endocrine System': 'III', 'Musculoskeletal System': 'XV', 'Integumentary System': 'XVII' };
   const dxName = () => P ? P.meta.dx.system : JUR === 'AB' ? 'ICD-9' : 'diagnostic code';
-  const chipText = v => P ? (v || '').replace(/\s*\([^)]*\)\s*$/, '').replace(/^Visits\/Examinations—/, '').slice(0, 22) : v === 'BASE' ? 'Base' : v;
+  const chipText = v => P ? ((P.meta.skills.find(x => x.code === v) || {}).name || v || '').replace(/\s*\([^)]*\)\s*$/, '').replace(/^Visits\/Examinations—/, '').slice(0, 22) : v === 'BASE' ? 'Base' : v;
   const pdfLink = (p, l, txt) => P && P.meta.pdf && p ? `<a target="_blank" rel="noopener noreferrer" href="${esc(P.meta.pdf)}#page=${p}">${esc(txt || P.meta.title + ' p. ' + (l || p))}</a>` : '';
   function switchJur(id, hash) {
     LS.set('jur', id);
@@ -282,7 +282,7 @@
       <p class="small muted">Choose another province or territory at the top. Alberta is the default.</p></div>`;
   }
   function footerOther() {
-    $('#dataline').innerHTML = P ? `Data: ${esc(P.meta.name)} ${esc(P.meta.title)}, ${esc(P.meta.effectiveLabel.toLowerCase())} · ${P.meta.counts.codes.toLocaleString()} codes · <a href="${esc(P.meta.pdf)}" target="_blank" rel="noopener noreferrer">PDF</a>`
+    $('#dataline').innerHTML = P ? `Data: ${esc(P.meta.name)} ${esc(P.meta.title)}, ${esc(P.meta.effectiveLabel.replace(/^./, ch => ch.toLowerCase()))} · ${P.meta.counts.codes.toLocaleString()} codes · <a href="${esc(P.meta.pdf)}" target="_blank" rel="noopener noreferrer">PDF</a>`
       : `${esc(JINFO ? JINFO.name : JUR)}: ${esc(JINFO ? JINFO.message : '')}`;
     const d = $('.foot .disclaimer'); if (d) d.textContent = P ? `Reference only; verify against the current ${P.meta.name} ${P.meta.title} before submitting claims.` : 'Reference only; verify against the official schedule before submitting claims.';
     renderSourceNote();
@@ -299,7 +299,7 @@
     }
     if (P) {
       const m = P.meta;
-      return `<p class="small">Source: ${esc(m.publisher)}, ${esc(m.title)}, ${esc(m.effectiveLabel.toLowerCase())}. ${a(m.pdf, 'Official PDF')} · ${a(m.landing, 'source page')}. Edition: ${esc(m.edition)}. Last checked by the app: ${esc(chk(m.checked))}.</p>
+      return `<p class="small">Source: ${esc(m.publisher)}, ${esc(m.title)}, ${esc(m.effectiveLabel.replace(/^./, ch => ch.toLowerCase()))}. ${a(m.pdf, 'Official PDF')} · ${a(m.landing, 'source page')}. Edition: ${esc(m.edition)}. Last checked by the app: ${esc(chk(m.checked))}.</p>
         ${m.dx && m.dx.label ? `<p class="small">Diagnostic codes: ${esc(m.dx.label)}. ${m.dx.url ? a(m.dx.url, m.dx.urlLabel || 'source') : ''}</p>` : ''}
         ${m.licence ? `<p class="small">${esc(m.licence.text)}${m.licence.url ? ' ' + a(m.licence.url, 'Licence') : ''}</p>` : ''}
         ${m.credit ? `<p class="small">${esc(m.credit)}</p>` : ''}
@@ -315,8 +315,17 @@
     return c.rows.find(r => r.sn === sk) || c.rows.find(r => !isSpecSec(r.sn)) || c.rows[0];
   }
   const TXT = { BR: 'By report', FS: 'F/S (included)' };
+  const skillName = () => { const s = P && P.meta.skills.find(x => x.code === skill); return s ? s.name : skill; };
+  const amtStr = v => typeof v === 'number' ? money(v) : (TXT[v] || String(v));
   function rowAmount(r, sk) {
     const m = P.meta;
+    if (m.pick) {
+      const k = (m.pick[sk] || m.pick[m.defaultSkill]).find(x => r[x] != null);
+      if (!k) return { amount: null, label: 'See document', note: '' };
+      const others = Object.keys(m.colNames).filter(x => x !== k && r[x] != null).map(x => `${m.colNames[x]} ${amtStr(r[x])}`);
+      const note = [(k !== sk ? m.colNames[k] : '') + (r.mk ? ' (marked ' + r.mk + ')' : ''), ...others].filter(x => x.trim()).join(' · ');
+      return typeof r[k] === 'number' ? { amount: r[k], label: '', note } : { amount: null, label: amtStr(r[k]), note };
+    }
     if (m.feeModel === 'units' && r.u != null) {
       const rate = m.unitRates ? (m.unitRates[sk] != null ? m.unitRates[sk] : null) : m.unitValue;
       return rate == null ? { amount: null, label: r.u + ' units', note: 'Choose a specialty to price the units' } : { amount: Math.round(r.u * rate * 100) / 100, label: '', note: `${r.u} units × ${money(rate)}` };
@@ -343,14 +352,16 @@
     const rowsHtml = `<div class="tablewrap"><table><thead><tr><th>Section</th><th>${esc(cols.f || 'Fee')}</th>${cols.au ? `<th>${esc(cols.au)}</th>` : ''}<th>Page</th></tr></thead><tbody>${c.rows.map(r => `<tr class="${r === r0 ? 'hl' : ''}"><td>${esc(r.sn)}${r.hn ? ' › ' + esc(r.hn) : ''}${r.d !== c.desc ? `<div class="small muted">${esc(r.d)}</div>` : ''}</td>${amtCells(r)}<td class="nowrap">${pdfLink(r.p, r.l, 'p. ' + r.l)}</td></tr>`).join('')}</tbody></table></div>`;
     const under = r0.o ? `<p class="small muted">Printed as “${esc(r0.o)}”, listed under “${esc(r0.u)}”.</p>` : '';
     const docLinks = [...new Set(c.rows.map(r => r.p))].slice(0, 6).map(p => { const r = c.rows.find(x => x.p === p); return pdfLink(p, r.l) + ` <span class="small muted">(${esc(r.sn)})</span>`; });
-    const extra = r0.au != null && cols.au ? `${esc(cols.au)}: ${esc(r0.au)}` : '';
-    const feeLabel = m.skills.length ? esc(skill) : 'Benefit';
-    const credit = `<p class="small muted srcmini">Source: ${esc(m.publisher)}, ${esc(m.title)} (${esc(m.effectiveLabel.toLowerCase())}). ${esc(m.governs)}</p>`;
+    const extraX = Object.entries(m.extraCols || {}).filter(([k]) => r0[k] != null).map(([k, n]) => `${esc(n)} ${esc(r0[k])}`).join(' · ');
+    const extra = [r0.au != null && cols.au ? `${esc(cols.au)}: ${esc(r0.au)}` : '', extraX].filter(Boolean).join(' · ');
+    const markP = r0.mk && m.markNote ? `<p class="small muted">${esc(m.markNote)}</p>` : '';
+    const feeLabel = m.skills.length ? esc(skillName()) : 'Benefit';
+    const credit = `<p class="small muted srcmini">Source: ${esc(m.publisher)}, ${esc(m.title)} (${esc(m.effectiveLabel.replace(/^./, ch => ch.toLowerCase()))}). ${esc(m.governs)}</p>`;
     if (phone) {
       el.innerHTML = `<div class="pcard">
         <button type="button" class="ghost back" id="pBack">‹ Results</button>
         <div class="row1"><span class="code codebig">${esc(c.code)}</span>${star(hk(c.code))}${r0.ast ? '<span class="badge">*</span>' : ''}</div>
-        <h2>${esc(r0.d)}</h2>${under}
+        <h2>${esc(r0.d)}</h2>${under}${markP}
         <div class="pfee"><div class="fee big">${feeTxt(f)}</div><div class="small muted">${feeLabel}${f.note ? ' · ' + esc(f.note) : ''}${extra ? ' · ' + extra : ''}</div><div class="small eff">${esc(m.name)} · ${esc(m.effectiveLabel)}</div></div>
         <div class="pbtns"><button type="button" class="ghost" id="pDoc" aria-expanded="false">Document</button><button type="button" class="ghost" id="askCode">Ask AI</button><button type="button" class="ghost" id="pMore">More about this condition</button></div>
         <div id="pDocs" class="links" hidden>${docLinks.join('') || '<span class="muted">No document page listed.</span>'}</div>
@@ -370,11 +381,11 @@
       el.innerHTML = `
         ${m.skills.length ? `<div class="mobileskill">${esc(m.skillLabel)} <select class="skillsel" aria-label="${esc(m.skillLabel)}"></select></div>` : ''}
         <div class="row1"><span class="code codebig">${esc(c.code)}</span>${star(hk(c.code))}${r0.ast ? '<span class="badge" title="Asterisked procedure (see Rule of Application 21)">*</span>' : ''}<span class="badge j">${esc(m.name)}</span></div>
-        <h2>${esc(r0.d)}</h2>${under}
+        <h2>${esc(r0.d)}</h2>${under}${markP}
         <div class="small muted">${esc([r0.sn, r0.hn].filter(Boolean).join(' › '))}</div>
         <div class="feeblock">
-          <div><div class="small muted">${m.skills.length ? 'Benefit (' + esc(skill) + ')' : 'Benefit'}</div><div class="fee big">${feeTxt(f)}</div><div class="small muted">${esc(f.note)}</div></div>
-          ${extra ? `<div><div class="small muted">${esc(cols.au)}</div><div class="fee">${esc(r0.au)}</div></div>` : ''}
+          <div><div class="small muted">${m.skills.length ? 'Benefit (' + esc(skillName()) + ')' : 'Benefit'}</div><div class="fee big">${feeTxt(f)}</div><div class="small muted">${esc(f.note)}</div></div>
+          ${extra ? `<div><div class="small muted">${r0.au != null && cols.au ? esc(cols.au) : 'Details'}</div><div class="fee">${r0.au != null && cols.au ? esc(r0.au) + (extraX ? ' · ' + extraX : '') : extraX}</div></div>` : ''}
           <div><div class="small muted">Effective</div><div class="eff">${esc(m.effectiveLabel)}</div></div>
         </div>
         <div class="row"><button class="ghost" id="askCode">Ask AI</button><button class="ghost" id="copyCode">Copy code</button></div>
@@ -402,7 +413,7 @@
     const f = ($('#pf').value || '').trim().toLowerCase(), cq = f.toUpperCase().replace(/\s+/g, '');
     const rows = CODES.filter(c => !f || c.code.startsWith(cq) || c.desc.toLowerCase().includes(f) || c.heads.toLowerCase().includes(f));
     const show = rows.slice(0, 300), cols = P.meta.cols || {};
-    $('#pricelist').innerHTML = `<p class="small muted pad">${rows.length.toLocaleString()} of ${CODES.length.toLocaleString()} codes${rows.length > 300 ? ' (first 300 shown; refine the filter)' : ''} · ${esc(P.meta.name)} ${esc(P.meta.title)}, ${esc(P.meta.effectiveLabel.toLowerCase())}${P.meta.skills.length ? ' · fees for ' + esc(skill) : ''}.</p>
+    $('#pricelist').innerHTML = `<p class="small muted pad">${rows.length.toLocaleString()} of ${CODES.length.toLocaleString()} codes${rows.length > 300 ? ' (first 300 shown; refine the filter)' : ''} · ${esc(P.meta.name)} ${esc(P.meta.title)}, ${esc(P.meta.effectiveLabel.replace(/^./, ch => ch.toLowerCase()))}${P.meta.skills.length ? ' · fees for ' + esc(skillName()) : ''}.</p>
       <table><thead><tr><th>Code</th><th>Description</th><th>Section</th><th>${esc(cols.f || 'Fee')}</th>${cols.au ? `<th>${esc(cols.au)}</th>` : ''}<th>Page</th></tr></thead><tbody>
       ${show.map(c => { const fe = feeFor(c), r = fe.row; return `<tr><td class="nowrap">${star(hk(c.code))}<a class="code" href="#/code/${esc(c.code)}">${esc(c.code)}</a></td><td>${esc(r.d)}</td><td class="small">${esc(r.sn)}</td><td class="fee">${feeTxt(fe)}</td>${cols.au ? `<td>${r.au != null ? esc(r.au) : ''}</td>` : ''}<td class="nowrap">${pdfLink(r.p, r.l, r.l)}</td></tr>`; }).join('')}
       </tbody></table>`;
@@ -410,7 +421,7 @@
   function provRules() {
     const f = ($('#rf').value || '').trim().toLowerCase();
     const rows = (P.rules || []).filter(r => !f || r.t.toLowerCase().includes(f));
-    $('#rules').innerHTML = `<p class="small muted">${esc(P.meta.rulesNote || '')} ${esc(P.meta.name)} ${esc(P.meta.title)}, ${esc(P.meta.effectiveLabel.toLowerCase())}. <a target="_blank" rel="noopener noreferrer" href="${esc(P.meta.pdf)}">Whole PDF</a></p>` +
+    $('#rules').innerHTML = `<p class="small muted">${esc(P.meta.rulesNote || '')} ${esc(P.meta.name)} ${esc(P.meta.title)}, ${esc(P.meta.effectiveLabel.replace(/^./, ch => ch.toLowerCase()))}. <a target="_blank" rel="noopener noreferrer" href="${esc(P.meta.pdf)}">Whole PDF</a></p>` +
       rows.map(r => `<div class="rule${r.g === 'h' ? ' rh' : ''}">${r.g === 'h' ? `<b>${esc(r.t)}</b>` : esc(r.t)} ${pdfLink(r.p, r.l, 'p. ' + r.l)}</div>`).join('');
   }
 
@@ -606,7 +617,7 @@
       <div class="savedh" id="savedRecent"><h3>Recent</h3>${rec ? '<button type="button" class="linkbtn" id="clearRecent">Clear</button>' : ''}</div>${rec || '<p class="muted small pad">Codes you open appear here (last ' + RECENT_MAX + ').</p>'}
       <div class="savedtools"><button type="button" class="ghost" id="expSaved">Export</button><button type="button" class="ghost" id="impSaved">Import</button></div>
       <p class="small muted pad savednote">Saved on this device only. Add to Home Screen on iPhone to keep them safe; use Export to back up or move to another device.</p>
-      <p class="muted small pad">${P ? (P.meta.skills.length ? `Fees shown for ${esc(P.meta.skillLabel.toLowerCase())} ${sk}. ` : '') + `Codes from other provinces or territories are marked; tap one to switch.` : JUR === 'AB' ? `Fees shown for fee skill ${sk}.` : ''} Search runs on this device only; nothing you type is sent anywhere.</p>`;
+      <p class="muted small pad">${P ? (P.meta.skills.length ? `Fees shown for ${esc(P.meta.skillLabel.toLowerCase())} ${esc(skillName())}. ` : '') + `Codes from other provinces or territories are marked; tap one to switch.` : JUR === 'AB' ? `Fees shown for fee skill ${sk}.` : ''} Search runs on this device only; nothing you type is sent anywhere.</p>`;
   }
   function openSaved(which) {
     goHome();
@@ -1093,12 +1104,12 @@
   ];
   const effShort = () => shortDate(META.sombEffective);
   function codePrompt(c) {
-    if (P) { const d = (c.desc || '').slice(0, 160), m = P.meta; return { text: `${m.name} ${m.title}, ${m.codeLabel.toLowerCase()} code ${c.code} (${d})${m.skills.length && skill ? ', ' + skill : ''}, ${m.effectiveLabel.toLowerCase()}: explain billing rules, common modifiers and appropriate ${dxName()} diagnostic codes. Verify against the current ${m.name} ${m.title}.`, topic: d }; }
+    if (P) { const d = (c.desc || '').slice(0, 160), m = P.meta; return { text: `${m.name} ${m.title}, ${m.codeLabel.toLowerCase()} code ${c.code} (${d})${m.skills.length && skill ? ', ' + skillName() : ''}, ${m.effectiveLabel.replace(/^./, ch => ch.toLowerCase())}: explain billing rules, common modifiers and appropriate ${dxName()} diagnostic codes. Verify against the current ${m.name} ${m.title}.`, topic: d }; }
     const d = (c.desc || '').slice(0, 160);
     return { text: `Alberta SOMB health service code ${c.code} (${d}), fee skill ${skill === 'BASE' ? 'not specified' : skill}, effective ${effShort()}: explain billing rules, common modifiers and appropriate ICD-9 codes. Verify against the current SOMB.`, topic: d };
   }
   function generalPrompt() {
-    if (JUR !== 'AB') { const n = JINFO ? JINFO.name : JUR, t = P ? P.meta.title : 'physician fee schedule'; return { text: `${n} ${t}${P ? ', ' + P.meta.effectiveLabel.toLowerCase() : ''}: explain how to choose fee codes, modifiers and diagnostic codes for physician billing. Verify against the current official ${n} schedule.`, topic: n + ' physician fee schedule' }; }
+    if (JUR !== 'AB') { const n = JINFO ? JINFO.name : JUR, t = P ? P.meta.title : 'physician fee schedule'; return { text: `${n} ${t}${P ? ', ' + P.meta.effectiveLabel.replace(/^./, ch => ch.toLowerCase()) : ''}: explain how to choose fee codes, modifiers and diagnostic codes for physician billing. Verify against the current official ${n} schedule.`, topic: n + ' physician fee schedule' }; }
     return { text: `Alberta Schedule of Medical Benefits (SOMB), fee skill ${skill === 'BASE' ? 'not specified' : skill}, effective ${effShort()}: explain how to choose health service codes, modifiers and ICD-9 diagnostic codes. Verify against the current SOMB.`, topic: 'Alberta Schedule of Medical Benefits' };
   }
   let aiPrompt = null, aiPick = null;
