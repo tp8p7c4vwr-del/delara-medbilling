@@ -159,7 +159,7 @@ html.phone .feedback summary{color:var(--teal-d);text-decoration:underline;curso
 .linkbtn{background:none;border:0;color:var(--teal);text-decoration:underline;cursor:pointer;font:inherit;font-size:.88rem;padding:6px}
 td.nowrap{white-space:nowrap}
 #moreMenu button[data-saved]{font-weight:600}
-.savedtools{display:flex;gap:8px;margin:12px 4px 0}.savednote{margin-top:6px}.savedtools .ghost{font-size:.75rem;line-height:1.2;padding:3px 8px;border-radius:6px;min-height:0}@media (pointer:coarse),(max-width:640px){.savedtools .ghost{min-height:32px;min-width:44px;padding:4px 10px}}.savedhelp{margin:8px 4px 0;line-height:1.45;color:var(--ink,inherit);max-width:62ch;overflow-wrap:anywhere}
+.savedtools{display:flex;flex-direction:column;gap:8px;margin:12px 4px 0}.savednote{margin-top:6px}.saverow{display:flex;align-items:center;gap:10px}.savedhelp{margin:0;line-height:1.45;color:var(--ink);max-width:62ch}.savedtools .ghost{position:relative;flex:0 0 auto;font-size:.75rem;line-height:1.2;padding:3px 8px;border-radius:6px;min-height:0;min-width:52px;text-align:center}.savedtools .ghost::after{content:"";position:absolute;left:50%;top:50%;width:max(100%,44px);height:max(100%,32px);transform:translate(-50%,-50%)}@media (max-width:420px){.saverow{flex-direction:column;align-items:flex-start;gap:4px}.saverow+.saverow{margin-top:6px}}
 
 /* provinces and territories */
 .jur{display:flex;align-items:center;gap:6px;font-size:.8rem;margin-left:auto}
