@@ -635,7 +635,7 @@
         <div class="saverow"><button type="button" class="ghost" id="impSaved" title="Load favourites &amp; recent codes from a saved file" aria-label="Load favourites &amp; recent codes from a saved file" aria-describedby="impHelp">Import</button><p class="small savedhelp" id="impHelp">Import loads that file back in. Nothing leaves your device unless you share the file.</p></div>
       </div>
       <p class="small muted pad savednote">Saved on this device only. Add to Home Screen on iPhone to keep them safe.</p>
-      <p class="muted small pad">${P ? (P.meta.skills.length ? `Fees shown for ${esc(P.meta.skillLabel.toLowerCase())} ${esc(skillName())}. ` : '') + `Codes from other provinces or territories are marked; tap one to switch.` : JUR === 'AB' ? `Fees shown for fee skill ${sk}.` : ''} Search runs on this device only; nothing you type is sent anywhere.</p>`;
+      <p class="muted small pad savedfoot">${P ? (P.meta.skills.length ? `Fees shown for ${esc(P.meta.skillLabel.toLowerCase())} ${esc(skillName())}. ` : '') + `Codes from other provinces or territories are marked; tap one to switch.` : JUR === 'AB' ? `Fees shown for fee skill ${sk}.` : ''} Search runs on this device only; nothing you type is sent anywhere.</p>`;
   }
   function openSaved(which) {
     goHome();

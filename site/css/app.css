@@ -159,7 +159,7 @@ html.phone .feedback summary{color:var(--teal-d);text-decoration:underline;curso
 .linkbtn{background:none;border:0;color:var(--teal);text-decoration:underline;cursor:pointer;font:inherit;font-size:.88rem;padding:6px}
 td.nowrap{white-space:nowrap}
 #moreMenu button[data-saved]{font-weight:600}
-.savedtools{display:flex;flex-direction:column;gap:8px;margin:12px 4px 0}.savednote{margin-top:6px}.saverow{display:flex;align-items:center;gap:10px}.savedhelp{margin:0;line-height:1.45;color:var(--ink);max-width:62ch}.savedtools .ghost{position:relative;flex:0 0 auto;font-size:.75rem;line-height:1.2;padding:3px 8px;border-radius:6px;min-height:0;min-width:52px;text-align:center}.savedtools .ghost::after{content:"";position:absolute;left:50%;top:50%;width:max(100%,44px);height:max(100%,32px);transform:translate(-50%,-50%)}@media (max-width:420px){.saverow{flex-direction:column;align-items:flex-start;gap:4px}.saverow+.saverow{margin-top:6px}}
+.savedtools{display:flex;flex-direction:column;gap:8px;margin:12px 4px 0}.savednote{margin:4px 0 0;padding:2px 12px;font-size:.6875rem;line-height:1.35;color:var(--muted,#6b7280)}.savedfoot{margin:2px 0 0;padding:2px 12px;line-height:1.35}.foot{margin-top:6px;padding-top:4px}.foot .dataline{margin:2px 0;line-height:1.35}.saverow{display:flex;align-items:center;gap:10px}.savedhelp{margin:0;line-height:1.45;color:var(--ink);max-width:62ch}.savedtools .ghost{position:relative;flex:0 0 auto;font-size:.75rem;line-height:1.2;padding:3px 8px;border-radius:6px;min-height:0;min-width:52px;text-align:center}.savedtools .ghost::after{content:"";position:absolute;left:50%;top:50%;width:max(100%,44px);height:max(100%,32px);transform:translate(-50%,-50%)}@media (max-width:420px){.saverow{flex-direction:column;align-items:flex-start;gap:4px}.saverow+.saverow{margin-top:6px}}
 
 /* provinces and territories */
 .jur{display:flex;align-items:center;gap:6px;font-size:.8rem;margin-left:auto}
@@ -182,3 +182,8 @@ html.jur-x .abonly,html.jur-soon .needdata,html.noskill .skill,html.noskill .ski
 .rule.rh{margin-top:12px}
 .morewrap{flex:0 0 auto}#moreBtn{white-space:nowrap}
 .mods{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.85em;color:var(--muted,#555);overflow-wrap:anywhere}
+/* v23 condensed notes/footer block */
+.savedtools{margin:6px 4px 0;gap:6px}.saverow .savedhelp{line-height:1.35}
+.foot p{margin:3px 0;line-height:1.35}.foot .dataline{margin:2px 0}
+.foot #srcnote{margin:4px 0;padding:4px 8px}.foot #srcnote p{margin:2px 0;line-height:1.35}
+.foot .feedback{margin:4px 0}.foot .copyright{margin-top:6px;padding:8px 12px}
