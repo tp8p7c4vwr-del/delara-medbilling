@@ -315,7 +315,7 @@
   function pickRow(c, sk) {
     return c.rows.find(r => r.sn === sk) || c.rows.find(r => !isSpecSec(r.sn)) || c.rows[0];
   }
-  const TXT = { BR: 'By report', FS: 'F/S (included)' };
+  const TXT = { BR: 'By report', FS: 'F/S (included)', NC: 'No charge (NC)', IC: 'Independent consideration (IC)' };
   const skillName = () => { const s = P && P.meta.skills.find(x => x.code === skill); return s ? s.name : skill; };
   const amtStr = v => typeof v === 'number' ? money(v) : (TXT[v] || String(v));
   function rowAmount(r, sk) {
@@ -337,6 +337,11 @@
       return rate == null ? { amount: null, label: r.u + ' units', note: 'Choose a specialty to price the units' } : { amount: Math.round(r.u * rate * 100) / 100, label: '', note: `${r.u} units × ${money(rate)}` };
     }
     if (r.v) { const k = r.v[sk] != null ? sk : m.defaultSkill, v = r.v[k], nm = k === sk && m.pick === undefined && m.feeModel === 'cols' ? '' : (m.colNames && m.colNames[k]) || k; return v == null ? { amount: null, label: '—', note: '' } : typeof v === 'number' ? { amount: v, label: '', note: nm } : { amount: null, label: v === 'IC' ? 'Independent consideration' : (TXT[v] || v), note: nm }; }
+    if (r.fp != null || r.sp != null) {  // separate FP and Spec. columns (NL visit premiums)
+      const k = sk === m.fpSkill ? 'fp' : 'sp', v = r[k], note = `FP ${r.fp != null ? amtStr(r.fp) : '—'} · Spec. ${r.sp != null ? amtStr(r.sp) : '—'}`;
+      return typeof v === 'number' ? { amount: v, label: '', note } : { amount: null, label: v != null ? amtStr(v) : '—', note };
+    }
+    if (r.f == null && r.an != null && m.anOnlyNote) return { amount: null, label: /unit/.test(r.an) ? r.an : r.an + ' units', note: 'Anaesthesia basic units' };
     if (typeof r.f === 'number') return { amount: r.f, label: '', note: r.fl || '' };
     if (typeof r.f === 'string') return { amount: null, label: TXT[r.f] || r.f, note: /%$/.test(r.f) ? 'Percentage premium' : '' };
     if (r.pro != null || r.tec != null) return { amount: null, label: [r.pro != null ? 'PRO ' + money(r.pro) : '', r.tec != null ? 'TEC ' + money(r.tec) : ''].filter(Boolean).join(' · '), note: 'Professional and technical components' };
@@ -357,7 +362,7 @@
     const amtCells = r => { const a = rowAmount(r, skill); return `<td class="fee">${feeTxt({ amount: a.amount, label: a.label })}${a.note ? `<div class="small muted">${esc(a.note)}</div>` : ''}</td>${cols.au ? `<td>${r.au != null ? esc(r.au) : ''}</td>` : ''}`; };
     const rowsHtml = `<div class="tablewrap"><table><thead><tr><th>Section</th><th>${esc(cols.f || 'Fee')}</th>${cols.au ? `<th>${esc(cols.au)}</th>` : ''}<th>Page</th></tr></thead><tbody>${c.rows.map(r => `<tr class="${r === r0 ? 'hl' : ''}"><td>${esc(r.sn)}${r.hn ? ' › ' + esc(r.hn) : ''}${r.d !== c.desc ? `<div class="small muted">${esc(r.d)}</div>` : ''}${r.m ? `<div class="small mods">${esc(r.m)}</div>` : ''}</td>${amtCells(r)}<td class="nowrap">${pdfLink(r.p, r.l, 'p. ' + r.l)}</td></tr>`).join('')}</tbody></table></div>`;
     const modsP = r0.m ? `<p class="small">Modifiers: <span class="mods">${esc(r0.m)}</span>${c.rows.length > 1 ? ` · ${c.rows.length} listings below` : ''}</p>` : '';
-    const unitP = [m.unitNote, m.pdfGen && m.pdfGen.note].filter(Boolean).map(t => `<p class="small muted">${esc(t)}</p>`).join('');
+    const unitP = [m.unitNote, m.pdfGen && m.pdfGen.note, r0.f == null && r0.an != null && m.anOnlyNote].filter(Boolean).map(t => `<p class="small muted">${esc(t)}</p>`).join('');
     const cav = m.caveat ? `<p class="small caveat">${esc(m.caveat.text)} <a target="_blank" rel="noopener noreferrer" href="${esc(m.caveat.url)}">${esc(m.caveat.urlLabel)}</a></p>` : '';
     const under = r0.o ? `<p class="small muted">Printed as “${esc(r0.o)}”, listed under “${esc(r0.u)}”.</p>` : '';
     const docLinks = [...new Set(c.rows.map(r => r.p))].slice(0, 6).map(p => { const r = c.rows.find(x => x.p === p); return pdfLink(p, r.l) + ` <span class="small muted">(${esc(r.sn)})</span>`; });
