@@ -187,3 +187,4 @@ html.jur-x .abonly,html.jur-soon .needdata,html.noskill .skill,html.noskill .ski
 .foot p{margin:3px 0;line-height:1.35}.foot .dataline{margin:2px 0}
 .foot #srcnote{margin:4px 0;padding:4px 8px}.foot #srcnote p{margin:2px 0;line-height:1.35}
 .foot .feedback{margin:4px 0}.foot .copyright{margin-top:6px;padding:8px 12px}
+.savedempty{margin:2px 0 4px;padding:2px 12px;line-height:1.35;min-height:0}
