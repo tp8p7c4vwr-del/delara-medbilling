@@ -340,7 +340,7 @@
       const rate = m.unitRates ? (m.unitRates[sk] != null ? m.unitRates[sk] : null) : m.unitValue;
       return rate == null ? { amount: null, label: r.u + ' units', note: 'Choose a specialty to price the units' } : { amount: Math.round(r.u * rate * 100) / 100, label: '', note: `${r.u} units × ${money(rate)}` };
     }
-    if (r.v) { const k = r.v[sk] != null ? sk : m.defaultSkill; return r.v[k] != null ? { amount: r.v[k], label: '', note: (m.colNames && m.colNames[k]) || k } : { amount: null, label: '—', note: '' }; }
+    if (r.v) { const k = r.v[sk] != null ? sk : m.defaultSkill, v = r.v[k], nm = k === sk && m.pick === undefined && m.feeModel === 'cols' ? '' : (m.colNames && m.colNames[k]) || k; return v == null ? { amount: null, label: '—', note: '' } : typeof v === 'number' ? { amount: v, label: '', note: nm } : { amount: null, label: v === 'IC' ? 'Independent consideration' : (TXT[v] || v), note: nm }; }
     if (typeof r.f === 'number') return { amount: r.f, label: '', note: r.fl || '' };
     if (typeof r.f === 'string') return { amount: null, label: TXT[r.f] || r.f, note: /%$/.test(r.f) ? 'Percentage premium' : '' };
     if (r.pro != null || r.tec != null) return { amount: null, label: [r.pro != null ? 'PRO ' + money(r.pro) : '', r.tec != null ? 'TEC ' + money(r.tec) : ''].filter(Boolean).join(' · '), note: 'Professional and technical components' };

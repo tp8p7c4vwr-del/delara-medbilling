@@ -1,5 +1,5 @@
 {
- "built": "2026-10-03T19:46:13-06:00",
+ "built": "2026-10-03T19:54:42-06:00",
  "list": [
   {
    "id": "AB",
@@ -82,11 +82,16 @@
    "id": "PE",
    "name": "Prince Edward Island",
    "group": "prov",
-   "status": "soon",
-   "message": "Coming soon - being prepared",
-   "why": "Parsing and spot-checking of the official schedule is in progress.",
+   "status": "live",
+   "file": "PE.json",
+   "effective": "2025-04-01",
+   "effectiveLabel": "Rates effective 1 April 2025 (next change 1 April 2027)",
+   "counts": {
+    "rows": 2406,
+    "codes": 2320
+   },
    "link": "https://www.princeedwardisland.ca/sites/default/files/publications/physician_services_agreement_2024-2029.pdf",
-   "linkLabel": "Physician Services Agreement 2024-2029"
+   "linkLabel": "Physician Services Agreement 2024–2029, Schedule A Tariff of Fees"
   },
   {
    "id": "QC",
