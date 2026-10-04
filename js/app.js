@@ -303,6 +303,7 @@
         ${m.dx && m.dx.label ? `<p class="small">Diagnostic codes: ${esc(m.dx.label)}. ${m.dx.url ? a(m.dx.url, m.dx.urlLabel || 'source') : ''}</p>` : ''}
         ${m.licence ? `<p class="small">${esc(m.licence.text)}${m.licence.url ? ' ' + a(m.licence.url, 'Licence') : ''}</p>` : ''}
         ${m.credit ? `<p class="small">${esc(m.credit)}</p>` : ''}
+        ${m.caveat ? `<p class="small caveat">${esc(m.caveat.text)}${m.caveat.url ? ' ' + a(m.caveat.url, m.caveat.urlLabel || 'Updates') : ''}</p>` : ''}
         <p class="small muted">${esc(m.governs || 'Reference only. The official schedule governs if there is any difference.')}</p>`;
     }
     const j = JINFO || {};
@@ -310,7 +311,7 @@
   }
   function renderSourceNote() { const el = $('#srcnote'); if (el) el.innerHTML = sourceNoteHtml(); }
   // ---- fees
-  const isSpecSec = n => /\(\d{2}(?:-\d+)?(?:, \d{2}(?:-\d+)?)*\)$/.test(n || '');
+  const isSpecSec = n => P && P.meta.specSecs ? P.meta.specSecs.includes(n) : /\(\d{2}(?:-\d+)?(?:, \d{2}(?:-\d+)?)*\)$/.test(n || '');
   function pickRow(c, sk) {
     return c.rows.find(r => r.sn === sk) || c.rows.find(r => !isSpecSec(r.sn)) || c.rows[0];
   }
@@ -319,6 +320,15 @@
   const amtStr = v => typeof v === 'number' ? money(v) : (TXT[v] || String(v));
   function rowAmount(r, sk) {
     const m = P.meta;
+    if (m.feeModel === 'msu') {
+      const an = r.an ? `Anaes units ${r.an}` : '';
+      if (!r.u) return { amount: null, label: r.an ? 'Anaesthetic only' : 'See document', note: an };
+      const mm = /^(\d+(?:\.\d+)?)\s*(.*)$/.exec(r.u);
+      if (!mm) return { amount: null, label: r.u === 'IC' ? 'Independent consideration' : r.u, note: [r.u === 'IC' ? '' : 'units as printed', an].filter(Boolean).join(' · ') };
+      const amt = Math.round(parseFloat(mm[1]) * m.msu * 100) / 100, rest = mm[2].trim();
+      const note = [`${mm[1]} units × ${money(m.msu)}`, an].filter(Boolean).join(' · ');
+      return rest ? { amount: null, label: `${money(amt)} ${rest.replace(/^\+\s*/, '+ ')}`, note } : { amount: amt, label: '', note };
+    }
     if (m.pick) {
       const k = (m.pick[sk] || m.pick[m.defaultSkill]).find(x => r[x] != null);
       if (!k) return { amount: null, label: 'See document', note: '' };
@@ -349,7 +359,10 @@
     const m = P.meta, f = feeFor(c), r0 = f.row, el = $('#detail'); el.hidden = false;
     const cols = m.cols || {};
     const amtCells = r => { const a = rowAmount(r, skill); return `<td class="fee">${feeTxt({ amount: a.amount, label: a.label })}${a.note ? `<div class="small muted">${esc(a.note)}</div>` : ''}</td>${cols.au ? `<td>${r.au != null ? esc(r.au) : ''}</td>` : ''}`; };
-    const rowsHtml = `<div class="tablewrap"><table><thead><tr><th>Section</th><th>${esc(cols.f || 'Fee')}</th>${cols.au ? `<th>${esc(cols.au)}</th>` : ''}<th>Page</th></tr></thead><tbody>${c.rows.map(r => `<tr class="${r === r0 ? 'hl' : ''}"><td>${esc(r.sn)}${r.hn ? ' › ' + esc(r.hn) : ''}${r.d !== c.desc ? `<div class="small muted">${esc(r.d)}</div>` : ''}</td>${amtCells(r)}<td class="nowrap">${pdfLink(r.p, r.l, 'p. ' + r.l)}</td></tr>`).join('')}</tbody></table></div>`;
+    const rowsHtml = `<div class="tablewrap"><table><thead><tr><th>Section</th><th>${esc(cols.f || 'Fee')}</th>${cols.au ? `<th>${esc(cols.au)}</th>` : ''}<th>Page</th></tr></thead><tbody>${c.rows.map(r => `<tr class="${r === r0 ? 'hl' : ''}"><td>${esc(r.sn)}${r.hn ? ' › ' + esc(r.hn) : ''}${r.d !== c.desc ? `<div class="small muted">${esc(r.d)}</div>` : ''}${r.m ? `<div class="small mods">${esc(r.m)}</div>` : ''}</td>${amtCells(r)}<td class="nowrap">${pdfLink(r.p, r.l, 'p. ' + r.l)}</td></tr>`).join('')}</tbody></table></div>`;
+    const modsP = r0.m ? `<p class="small">Modifiers: <span class="mods">${esc(r0.m)}</span>${c.rows.length > 1 ? ` · ${c.rows.length} listings below` : ''}</p>` : '';
+    const unitP = m.unitNote ? `<p class="small muted">${esc(m.unitNote)}</p>` : '';
+    const cav = m.caveat ? `<p class="small caveat">${esc(m.caveat.text)} <a target="_blank" rel="noopener noreferrer" href="${esc(m.caveat.url)}">${esc(m.caveat.urlLabel)}</a></p>` : '';
     const under = r0.o ? `<p class="small muted">Printed as “${esc(r0.o)}”, listed under “${esc(r0.u)}”.</p>` : '';
     const docLinks = [...new Set(c.rows.map(r => r.p))].slice(0, 6).map(p => { const r = c.rows.find(x => x.p === p); return pdfLink(p, r.l) + ` <span class="small muted">(${esc(r.sn)})</span>`; });
     const extraX = Object.entries(m.extraCols || {}).filter(([k]) => r0[k] != null).map(([k, n]) => `${esc(n)} ${esc(r0[k])}`).join(' · ');
@@ -361,12 +374,12 @@
       el.innerHTML = `<div class="pcard">
         <button type="button" class="ghost back" id="pBack">‹ Results</button>
         <div class="row1"><span class="code codebig">${esc(c.code)}</span>${star(hk(c.code))}${r0.ast ? '<span class="badge">*</span>' : ''}</div>
-        <h2>${esc(r0.d)}</h2>${under}${markP}
+        <h2>${esc(r0.d)}</h2>${under}${markP}${modsP}
         <div class="pfee"><div class="fee big">${feeTxt(f)}</div><div class="small muted">${feeLabel}${f.note ? ' · ' + esc(f.note) : ''}${extra ? ' · ' + extra : ''}</div><div class="small eff">${esc(m.name)} · ${esc(m.effectiveLabel)}</div></div>
         <div class="pbtns"><button type="button" class="ghost" id="pDoc" aria-expanded="false">Document</button><button type="button" class="ghost" id="askCode">Ask AI</button><button type="button" class="ghost" id="pMore">More about this condition</button></div>
         <div id="pDocs" class="links" hidden>${docLinks.join('') || '<span class="muted">No document page listed.</span>'}</div>
         ${c.rows.length > 1 ? `<details><summary>All listings (${c.rows.length})</summary>${rowsHtml}</details>` : ''}
-        <h3>Suggested ${esc(dxName())}</h3><p class="small muted" id="icdsugbasis"></p><div id="icdsug" class="picklist"></div>${credit}</div>`;
+        <h3>Suggested ${esc(dxName())}</h3><p class="small muted" id="icdsugbasis"></p><div id="icdsug" class="picklist"></div>${unitP}${cav}${credit}</div>`;
       const sg = suggestIcd(c); $('#icdsugbasis').textContent = ICD.length ? sg.basis : ''; renderIcdList($('#icdsug'), ICD.length ? sg.rows : [], ICD.length ? sg.empty : noDxMsg());
       pickedIcd = ICD.length && sg.rows.length ? sg.rows[0].i.code : null;
       const mark = () => $$('#icdsug .icdrow').forEach(x => x.classList.toggle('picked', x.dataset.icd === pickedIcd)); mark();
@@ -381,7 +394,7 @@
       el.innerHTML = `
         ${m.skills.length ? `<div class="mobileskill">${esc(m.skillLabel)} <select class="skillsel" aria-label="${esc(m.skillLabel)}"></select></div>` : ''}
         <div class="row1"><span class="code codebig">${esc(c.code)}</span>${star(hk(c.code))}${r0.ast ? '<span class="badge" title="Asterisked procedure (see Rule of Application 21)">*</span>' : ''}<span class="badge j">${esc(m.name)}</span></div>
-        <h2>${esc(r0.d)}</h2>${under}${markP}
+        <h2>${esc(r0.d)}</h2>${under}${markP}${modsP}
         <div class="small muted">${esc([r0.sn, r0.hn].filter(Boolean).join(' › '))}</div>
         <div class="feeblock">
           <div><div class="small muted">${m.skills.length ? 'Benefit (' + esc(skillName()) + ')' : 'Benefit'}</div><div class="fee big">${feeTxt(f)}</div><div class="small muted">${esc(f.note)}</div></div>
@@ -392,7 +405,7 @@
         <h3>In the official document</h3><div class="links">${docLinks.join('') || '<span class="muted">—</span>'}</div>
         <p class="small">Notes, rules and modifiers for this code are on the linked page and in the ${esc(m.title)} rules (<a href="#/rules">Rules tab</a>).</p>
         <h3>${c.rows.length > 1 ? 'All listings (' + c.rows.length + ')' : 'Listing'}</h3>${rowsHtml}
-        <h3>Suggested ${esc(dxName())} <span class="small muted" id="icdsugbasis"></span></h3><div id="icdsug"></div>${credit}`;
+        <h3>Suggested ${esc(dxName())} <span class="small muted" id="icdsugbasis"></span></h3><div id="icdsug"></div>${unitP}${cav}${credit}`;
       const ss = $('.skillsel', el); if (ss) { skillOptions(ss); ss.addEventListener('change', e => setSkill(e.target.value)); }
       $('#askCode').onclick = () => openAI(codePrompt(c));
       $('#copyCode').onclick = () => copy(c.code, 'Code copied');
