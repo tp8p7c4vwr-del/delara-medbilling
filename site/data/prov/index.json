@@ -1,5 +1,5 @@
 {
- "built": "2026-10-03T19:54:42-06:00",
+ "built": "2026-10-03T20:03:58-06:00",
  "list": [
   {
    "id": "AB",
@@ -59,7 +59,7 @@
    "status": "live",
    "file": "NS.json",
    "effective": "2026-04-01",
-   "effectiveLabel": "Manual of July 2026, MSU $2.96 from 1 April 2026",
+   "effectiveLabel": "Manual of July 2026 (units as printed)",
    "counts": {
     "rows": 5663,
     "codes": 2992,
