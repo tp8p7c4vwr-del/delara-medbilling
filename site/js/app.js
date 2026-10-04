@@ -378,7 +378,7 @@
         <div class="row1"><span class="code codebig">${esc(c.code)}</span>${star(hk(c.code))}${r0.ast ? '<span class="badge">*</span>' : ''}</div>
         <h2>${esc(r0.d)}</h2>${under}${markP}${modsP}
         <div class="pfee"><div class="fee big">${feeTxt(f)}</div><div class="small muted">${feeLabel}${f.note ? ' · ' + esc(f.note) : ''}${extra ? ' · ' + extra : ''}</div><div class="small eff">${esc(m.name)} · ${esc(m.effectiveLabel)}</div></div>
-        <div class="pbtns"><button type="button" class="ghost" id="pDoc" aria-expanded="false">Document</button><button type="button" class="ghost" id="askCode">Ask AI</button><button type="button" class="ghost" id="pMore">More about this condition</button></div>
+        <div class="pbtns"><button type="button" class="ghost" id="pDoc" aria-expanded="false">Document</button><button type="button" class="ghost" id="askCode">Ask SI/AI</button><button type="button" class="ghost" id="pMore">More about this condition</button></div>
         <div id="pDocs" class="links" hidden>${docLinks.join('') || '<span class="muted">No document page listed.</span>'}</div>
         ${c.rows.length > 1 ? `<details><summary>All listings (${c.rows.length})</summary>${rowsHtml}</details>` : ''}
         <h3>Suggested ${esc(dxName())}</h3><p class="small muted" id="icdsugbasis"></p><div id="icdsug" class="picklist"></div>${unitP}${cav}${credit}</div>`;
@@ -403,7 +403,7 @@
           ${extra ? `<div><div class="small muted">${r0.au != null && cols.au ? esc(cols.au) : 'Details'}</div><div class="fee">${r0.au != null && cols.au ? esc(r0.au) + (extraX ? ' · ' + extraX : '') : extraX}</div></div>` : ''}
           <div><div class="small muted">Effective</div><div class="eff">${esc(m.effectiveLabel)}</div></div>
         </div>
-        <div class="row"><button class="ghost" id="askCode">Ask AI</button><button class="ghost" id="copyCode">Copy code</button></div>
+        <div class="row"><button class="ghost" id="askCode">Ask SI/AI</button><button class="ghost" id="copyCode">Copy code</button></div>
         <h3>In the official document</h3><div class="links">${docLinks.join('') || '<span class="muted">—</span>'}</div>
         <p class="small">Notes, rules and modifiers for this code are on the linked page and in the ${esc(m.title)} rules (<a href="#/rules">Rules tab</a>).</p>
         <h3>${c.rows.length > 1 ? 'All listings (' + c.rows.length + ')' : 'Listing'}</h3>${rowsHtml}
@@ -697,7 +697,7 @@
         ${skill !== 'BASE' && f.amount !== c.base && !c.byAssess ? `<div><div class="small muted">Schedule base</div><div class="fee">${money(c.base)}</div></div>` : ''}
         ${c.ane != null ? `<div><div class="small muted">Anaesthetic benefit (separate)</div><div class="fee">${money(c.ane)}</div></div>` : ''}
       </div>
-      <div class="row"><button class="ghost" id="askCode">Ask AI</button><button class="ghost" id="copyCode">Copy HSC</button></div>
+      <div class="row"><button class="ghost" id="askCode">Ask SI/AI</button><button class="ghost" id="copyCode">Copy HSC</button></div>
       ${call.length ? `<h3>For your description</h3><ul>${call.map(x => `<li>${x}</li>`).join('')}</ul>` : ''}
       ${c.notes ? `<h3>Notes</h3><p>${grLinks(c.notes)}</p>` : ''}
       ${c.gr && c.gr.length ? `<p class="small">Governing rules: ${c.gr.map(g => `<a href="#/rules/${g}">GR ${g}</a>`).join(', ')}</p>` : ''}
@@ -727,7 +727,7 @@
       <h2>${esc(c.desc)}</h2>
       <div class="pfee"><div class="fee big">${f.amount == null ? esc(f.label) : money(f.amount)}</div>
         <div class="small muted">Schedule fee (${esc(skill === 'BASE' ? 'base' : skill)})${skill !== 'BASE' && f.amount !== c.base && !c.byAssess ? ' · base ' + money(c.base) : ''}${c.ane != null ? ' · anaesthetic ' + money(c.ane) + ' (separate)' : ''}</div></div>
-      <div class="pbtns"><button type="button" class="ghost" id="pDoc" aria-expanded="false">Document</button><button type="button" class="ghost" id="askCode">Ask AI</button><button type="button" class="ghost" id="pMore">More about this condition</button></div>
+      <div class="pbtns"><button type="button" class="ghost" id="pDoc" aria-expanded="false">Document</button><button type="button" class="ghost" id="askCode">Ask SI/AI</button><button type="button" class="ghost" id="pMore">More about this condition</button></div>
       <div id="pDocs" class="links" hidden>${docLinks.join('') || '<span class="muted">No document page listed.</span>'}</div>
       ${call.length ? `<details><summary>For your description</summary><ul>${call.map(x => `<li>${x}</li>`).join('')}</ul></details>` : ''}
       ${c.notes || (c.gr && c.gr.length) ? `<details><summary>Key notes</summary>${c.notes ? `<p>${grLinks(c.notes)}</p>` : ''}${c.gr && c.gr.length ? `<p class="small">Governing rules: ${c.gr.map(g => `<a href="#/rules/${g}">GR ${g}</a>`).join(', ')}</p>` : ''}</details>` : ''}
