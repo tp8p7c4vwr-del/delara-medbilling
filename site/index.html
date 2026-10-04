@@ -34,6 +34,10 @@
     <img src="icons/icon-192.png" alt="" width="32" height="32">
     <span class="title" aria-hidden="true">MedBilling Fee Desk</span>
   </a>
+  <label class="jur">
+    <span>Province</span>
+    <select id="jur" aria-label="Province or territory"><option value="AB">Alberta</option></select>
+  </label>
   <label class="skill">
     <span>Fee skill</span>
     <select id="skill" aria-label="Fee skill (SKLL)"></select>
@@ -41,6 +45,7 @@
   <button type="button" id="layoutToggle" class="layoutlink" hidden>Desktop version</button>
 </header>
 <nav class="phonenav" aria-label="Phone navigation">
+  <label class="chip jurchip"><b id="jurChipText">AB</b> ▾<select id="jurChip" aria-label="Province or territory"></select></label>
   <label class="chip skillchip"><span class="small">Fee skill</span> <b id="skillChipText">OBGY</b> ▾<select id="skillChip" aria-label="Fee skill"></select></label>
   <div class="morewrap">
     <button type="button" class="chip" id="moreBtn" aria-haspopup="true" aria-expanded="false">More ▾</button>
@@ -48,33 +53,34 @@
       <button role="menuitem" data-tab="procedures">Procedures</button>
       <button role="menuitem" data-saved="fav">★ Favourites</button>
       <button role="menuitem" data-saved="recent">Recent</button>
-      <button role="menuitem" data-tab="icd9">ICD-9</button>
-      <button role="menuitem" data-tab="price">Price list</button>
-      <button role="menuitem" data-tab="rules">Rules</button>
-      <button role="menuitem" data-tab="modifiers">Modifiers</button>
-      <button role="menuitem" data-tab="explanatory">Explanatory</button>
-      <button role="menuitem" data-tab="bulletins">Bulletins</button>
-      <button role="menuitem" data-tab="notes">Claim notes</button>
+      <button role="menuitem" data-tab="icd9" class="needdata">ICD-9</button>
+      <button role="menuitem" data-tab="price" class="needdata">Price list</button>
+      <button role="menuitem" data-tab="rules" class="needdata">Rules</button>
+      <button role="menuitem" data-tab="modifiers" class="abonly">Modifiers</button>
+      <button role="menuitem" data-tab="explanatory" class="abonly">Explanatory</button>
+      <button role="menuitem" data-tab="bulletins" class="abonly">Bulletins</button>
+      <button role="menuitem" data-tab="notes" class="abonly">Claim notes</button>
       <button role="menuitem" data-tab="resources">Resources</button>
     </div>
   </div>
 </nav>
 <nav class="tabs" id="tabs" role="tablist">
   <button data-tab="procedures" class="on">Procedures</button>
-  <button data-tab="price">Price list</button>
-  <button data-tab="rules">Rules</button>
-  <button data-tab="modifiers">Modifiers</button>
-  <button data-tab="explanatory">Explanatory</button>
-  <button data-tab="icd9">ICD-9</button>
-  <button data-tab="bulletins">Bulletins</button>
-  <button data-tab="notes">Claim notes</button>
+  <button data-tab="price" class="needdata">Price list</button>
+  <button data-tab="rules" class="needdata">Rules</button>
+  <button data-tab="modifiers" class="abonly">Modifiers</button>
+  <button data-tab="explanatory" class="abonly">Explanatory</button>
+  <button data-tab="icd9" class="needdata">ICD-9</button>
+  <button data-tab="bulletins" class="abonly">Bulletins</button>
+  <button data-tab="notes" class="abonly">Claim notes</button>
   <button data-tab="resources">Resources</button>
 </nav>
 
 <main id="main">
+  <div id="jurbar" class="jurbar" hidden></div>
   <!-- Procedures -->
   <section id="tab-procedures" class="tab on">
-    <form id="qform" class="searchbar" autocomplete="off" role="search">
+    <form id="qform" class="searchbar needdata" autocomplete="off" role="search">
       <div class="inputwrap">
         <input id="q" type="search" enterkeyhint="search" inputmode="search" autocapitalize="off" spellcheck="false"
                placeholder="Describe the service or enter an HSC" aria-label="Procedure description">
@@ -83,7 +89,7 @@
       <button type="submit" class="primary">Search</button>
       <button type="button" class="ghost" id="askGeneral">Ask AI</button>
     </form>
-    <div class="opts">
+    <div class="opts needdata">
       <label><input type="checkbox" id="limitSkill" checked> Limit to fee-skill sections</label>
       <span id="timehint" class="muted"></span>
     </div>
@@ -138,6 +144,7 @@
 <footer class="foot">
   <p id="dataline" class="dataline">Data: SOMB effective …, source alberta.ca</p>
   <p class="disclaimer">Reference only; verify against the current SOMB before submitting claims.</p>
+  <div id="srcnote" class="srcnote"></div>
   <p class="small muted">External links for reference; MedBilling Fee Desk is not affiliated.</p>
   <p class="small muted">No patient data is stored. No analytics or trackers. Search runs on this device.</p>
   <details class="feedback">
