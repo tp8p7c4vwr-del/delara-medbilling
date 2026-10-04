@@ -1,5 +1,5 @@
 {
- "built": "2026-10-03T20:08:19-06:00",
+ "built": "2026-10-03T20:20:04-06:00",
  "list": [
   {
    "id": "AB",
@@ -148,11 +148,17 @@
    "id": "YT",
    "name": "Yukon",
    "group": "terr",
-   "status": "soon",
-   "message": "Coming soon - being prepared",
-   "why": "Parsing and spot-checking of the official schedule is in progress.",
+   "status": "live",
+   "file": "YT.json",
+   "effective": "2026-04-01",
+   "effectiveLabel": "Effective 1 April 2026",
+   "counts": {
+    "rows": 2804,
+    "codes": 2647,
+    "skipped": 1
+   },
    "link": "https://apps.gov.yk.ca/physicianresources/f?p=271:9000",
-   "linkLabel": "Yukon Physician Fee Guide"
+   "linkLabel": "Payment Schedule"
   }
  ]
 }

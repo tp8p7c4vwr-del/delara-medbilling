@@ -198,7 +198,7 @@
     'Audio-Vestibular System': 'V', 'Nervous System': 'II', 'Endocrine System': 'III', 'Musculoskeletal System': 'XV', 'Integumentary System': 'XVII' };
   const dxName = () => P ? P.meta.dx.system : JUR === 'AB' ? 'ICD-9' : 'diagnostic code';
   const chipText = v => P ? ((P.meta.skills.find(x => x.code === v) || {}).name || v || '').replace(/\s*\([^)]*\)\s*$/, '').replace(/^Visits\/Examinations—/, '').slice(0, 22) : v === 'BASE' ? 'Base' : v;
-  const pdfLink = (p, l, txt) => P && P.meta.pdf && p ? `<a target="_blank" rel="noopener noreferrer" href="${esc(P.meta.pdf)}#page=${p}">${esc(txt || P.meta.title + ' p. ' + (l || p))}</a>` : '';
+  const pdfLink = (p, l, txt) => P && P.meta.pdf && p ? `<a target="_blank" rel="noopener noreferrer" href="${esc(P.meta.pdf)}${P.meta.pdfGen ? '' : '#page=' + p}">${esc(txt || P.meta.title + ' p. ' + (l || p))}</a>` : '';
   function switchJur(id, hash) {
     LS.set('jur', id);
     location.href = location.pathname + location.search + (hash || '');
@@ -299,7 +299,7 @@
     }
     if (P) {
       const m = P.meta;
-      return `<p class="small">Source: ${esc(m.publisher)}, ${esc(m.title)}, ${esc(m.effectiveLabel.replace(/^./, ch => ch.toLowerCase()))}. ${a(m.pdf, 'Official PDF')} · ${a(m.landing, 'source page')}. Edition: ${esc(m.edition)}. Last checked by the app: ${esc(chk(m.checked))}.</p>
+      return `<p class="small">Source: ${esc(m.publisher)}, ${esc(m.title)}, ${esc(m.effectiveLabel.replace(/^./, ch => ch.toLowerCase()))}. ${a(m.pdf, m.pdfGen ? m.pdfGen.label : 'Official PDF')} · ${a(m.landing, 'source page')}. Edition: ${esc(m.edition)}. Last checked by the app: ${esc(chk(m.checked))}.</p>
         ${m.dx && m.dx.label ? `<p class="small">Diagnostic codes: ${esc(m.dx.label)}. ${m.dx.url ? a(m.dx.url, m.dx.urlLabel || 'source') : ''}</p>` : ''}
         ${m.licence ? `<p class="small">${esc(m.licence.text)}${m.licence.url ? ' ' + a(m.licence.url, 'Licence') : ''}</p>` : ''}
         ${m.credit ? `<p class="small">${esc(m.credit)}</p>` : ''}
@@ -357,13 +357,13 @@
     const amtCells = r => { const a = rowAmount(r, skill); return `<td class="fee">${feeTxt({ amount: a.amount, label: a.label })}${a.note ? `<div class="small muted">${esc(a.note)}</div>` : ''}</td>${cols.au ? `<td>${r.au != null ? esc(r.au) : ''}</td>` : ''}`; };
     const rowsHtml = `<div class="tablewrap"><table><thead><tr><th>Section</th><th>${esc(cols.f || 'Fee')}</th>${cols.au ? `<th>${esc(cols.au)}</th>` : ''}<th>Page</th></tr></thead><tbody>${c.rows.map(r => `<tr class="${r === r0 ? 'hl' : ''}"><td>${esc(r.sn)}${r.hn ? ' › ' + esc(r.hn) : ''}${r.d !== c.desc ? `<div class="small muted">${esc(r.d)}</div>` : ''}${r.m ? `<div class="small mods">${esc(r.m)}</div>` : ''}</td>${amtCells(r)}<td class="nowrap">${pdfLink(r.p, r.l, 'p. ' + r.l)}</td></tr>`).join('')}</tbody></table></div>`;
     const modsP = r0.m ? `<p class="small">Modifiers: <span class="mods">${esc(r0.m)}</span>${c.rows.length > 1 ? ` · ${c.rows.length} listings below` : ''}</p>` : '';
-    const unitP = m.unitNote ? `<p class="small muted">${esc(m.unitNote)}</p>` : '';
+    const unitP = [m.unitNote, m.pdfGen && m.pdfGen.note].filter(Boolean).map(t => `<p class="small muted">${esc(t)}</p>`).join('');
     const cav = m.caveat ? `<p class="small caveat">${esc(m.caveat.text)} <a target="_blank" rel="noopener noreferrer" href="${esc(m.caveat.url)}">${esc(m.caveat.urlLabel)}</a></p>` : '';
     const under = r0.o ? `<p class="small muted">Printed as “${esc(r0.o)}”, listed under “${esc(r0.u)}”.</p>` : '';
     const docLinks = [...new Set(c.rows.map(r => r.p))].slice(0, 6).map(p => { const r = c.rows.find(x => x.p === p); return pdfLink(p, r.l) + ` <span class="small muted">(${esc(r.sn)})</span>`; });
     const extraX = Object.entries(m.extraCols || {}).filter(([k]) => r0[k] != null).map(([k, n]) => `${esc(n)} ${esc(r0[k])}`).join(' · ');
     const extra = [r0.au != null && cols.au ? `${esc(cols.au)}: ${esc(r0.au)}` : '', extraX].filter(Boolean).join(' · ');
-    const markP = r0.mk && m.markNote ? `<p class="small muted">${esc(m.markNote)}</p>` : '';
+    const mkN = r0.mk && (m.markNotes ? m.markNotes[r0.mk] : m.markNote), markP = mkN ? `<p class="small muted">${esc(mkN)}</p>` : '';
     const feeLabel = m.skills.length ? esc(skillName()) : 'Benefit';
     const credit = `<p class="small muted srcmini">Source: ${esc(m.publisher)}, ${esc(m.title)} (${esc(m.effectiveLabel.replace(/^./, ch => ch.toLowerCase()))}). ${esc(m.governs)}</p>`;
     if (phone) {
@@ -430,7 +430,7 @@
   function provRules() {
     const f = ($('#rf').value || '').trim().toLowerCase();
     const rows = (P.rules || []).filter(r => !f || r.t.toLowerCase().includes(f));
-    $('#rules').innerHTML = `<p class="small muted">${esc(P.meta.rulesNote || '')} ${esc(P.meta.name)} ${esc(P.meta.title)}, ${esc(P.meta.effectiveLabel.replace(/^./, ch => ch.toLowerCase()))}. <a target="_blank" rel="noopener noreferrer" href="${esc(P.meta.pdf)}">Whole PDF</a></p>` +
+    $('#rules').innerHTML = `<p class="small muted">${esc(P.meta.rulesNote || '')} ${esc(P.meta.name)} ${esc(P.meta.title)}, ${esc(P.meta.effectiveLabel.replace(/^./, ch => ch.toLowerCase()))}. <a target="_blank" rel="noopener noreferrer" href="${esc(P.meta.pdf)}">${esc(P.meta.pdfGen ? P.meta.pdfGen.label : 'Whole PDF')}</a></p>` +
       rows.map(r => `<div class="rule${r.g === 'h' ? ' rh' : ''}">${r.g === 'h' ? `<b>${esc(r.t)}</b>` : esc(r.t)} ${pdfLink(r.p, r.l, 'p. ' + r.l)}</div>`).join('');
   }
 
