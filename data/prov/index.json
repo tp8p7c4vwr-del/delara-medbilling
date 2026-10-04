@@ -1,5 +1,5 @@
 {
- "built": "2026-10-03T20:29:01-06:00",
+ "built": "2026-10-03T20:39:34-06:00",
  "list": [
   {
    "id": "AB",
@@ -46,10 +46,16 @@
    "id": "NL",
    "name": "Newfoundland and Labrador",
    "group": "prov",
-   "status": "soon",
-   "message": "Coming soon - being prepared",
-   "why": "Parsing and spot-checking of the official schedule is in progress.",
-   "link": "https://www.gov.nl.ca/hcs/files/Medical-Payment-Schedule-October-1-2026.pdf",
+   "status": "live",
+   "file": "NL.json",
+   "effective": "2026-10-01",
+   "effectiveLabel": "Effective 1 October 2026",
+   "counts": {
+    "rows": 4665,
+    "codes": 4182,
+    "skipped": 18
+   },
+   "link": "https://www.gov.nl.ca/hcs/mcp/providers/",
    "linkLabel": "MCP Medical Payment Schedule"
   },
   {
