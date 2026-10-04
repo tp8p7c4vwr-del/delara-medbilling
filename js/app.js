@@ -320,14 +320,10 @@
   const amtStr = v => typeof v === 'number' ? money(v) : (TXT[v] || String(v));
   function rowAmount(r, sk) {
     const m = P.meta;
-    if (m.feeModel === 'msu') {
+    if (m.feeModel === 'msu') {  // units only, exactly as printed (no dollar conversion)
       const an = r.an ? `Anaes units ${r.an}` : '';
-      if (!r.u) return { amount: null, label: r.an ? 'Anaesthetic only' : 'See document', note: an };
-      const mm = /^(\d+(?:\.\d+)?)\s*(.*)$/.exec(r.u);
-      if (!mm) return { amount: null, label: r.u === 'IC' ? 'Independent consideration' : r.u, note: [r.u === 'IC' ? '' : 'units as printed', an].filter(Boolean).join(' · ') };
-      const amt = Math.round(parseFloat(mm[1]) * m.msu * 100) / 100, rest = mm[2].trim();
-      const note = [`${mm[1]} units × ${money(m.msu)}`, an].filter(Boolean).join(' · ');
-      return rest ? { amount: null, label: `${money(amt)} ${rest.replace(/^\+\s*/, '+ ')}`, note } : { amount: amt, label: '', note };
+      if (!r.u) return { amount: null, label: r.an ? 'Anaesthetic units only' : 'See document', note: an };
+      return { amount: null, label: r.u === 'IC' ? 'Independent consideration' : `${r.u} units`, note: [r.u === 'IC' ? '' : 'Base units as printed', an].filter(Boolean).join(' · ') };
     }
     if (m.pick) {
       const k = (m.pick[sk] || m.pick[m.defaultSkill]).find(x => r[x] != null);
