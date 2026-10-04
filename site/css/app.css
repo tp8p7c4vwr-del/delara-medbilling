@@ -181,3 +181,4 @@ html.jur-x .abonly,html.jur-soon .needdata,html.noskill .skill,html.noskill .ski
 .srcmini{margin-top:14px}
 .rule.rh{margin-top:12px}
 .morewrap{flex:0 0 auto}#moreBtn{white-space:nowrap}
+.mods{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.85em;color:var(--muted,#555);overflow-wrap:anywhere}

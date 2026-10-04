@@ -1,5 +1,5 @@
 {
- "built": "2026-10-03T19:32:38-06:00",
+ "built": "2026-10-03T19:46:13-06:00",
  "list": [
   {
    "id": "AB",
@@ -56,11 +56,17 @@
    "id": "NS",
    "name": "Nova Scotia",
    "group": "prov",
-   "status": "soon",
-   "message": "Coming soon - being prepared",
-   "why": "Parsing and spot-checking of the official schedule is in progress.",
+   "status": "live",
+   "file": "NS.json",
+   "effective": "2026-04-01",
+   "effectiveLabel": "Manual of July 2026, MSU $2.96 from 1 April 2026",
+   "counts": {
+    "rows": 5663,
+    "codes": 2992,
+    "skipped": 2
+   },
    "link": "https://msi.medavie.bluecross.ca/physicians-manual/",
-   "linkLabel": "MSI Physician's Manual"
+   "linkLabel": "MSI Physician’s Manual"
   },
   {
    "id": "ON",
