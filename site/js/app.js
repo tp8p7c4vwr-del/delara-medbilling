@@ -628,8 +628,8 @@
     const box = $('#results'); box._ctx = null;
     const fav = FAVS.map(savedRow).filter(Boolean).join(''), rec = RECENT.map(savedRow).filter(Boolean).join('');
     const sk = esc(skill === 'BASE' ? 'base' : skill);
-    box.innerHTML = (JINFO && JINFO.status !== 'live' ? soonPanel() : '') + `<div class="savedh" id="savedFav"><h3>★ Favourites</h3></div>${fav || '<p class="muted small pad">Tap ☆ on any code to keep it here.</p>'}
-      <div class="savedh" id="savedRecent"><h3>Recent</h3>${rec ? '<button type="button" class="linkbtn" id="clearRecent">Clear</button>' : ''}</div>${rec || '<p class="muted small pad">Codes you open appear here (last ' + RECENT_MAX + ').</p>'}
+    box.innerHTML = (JINFO && JINFO.status !== 'live' ? soonPanel() : '') + `<div class="savedh" id="savedFav"><h3>★ Favourites</h3></div>${fav || '<p class="muted small pad savedempty">Tap ☆ on any code to keep it here.</p>'}
+      <div class="savedh" id="savedRecent"><h3>Recent</h3>${rec ? '<button type="button" class="linkbtn" id="clearRecent">Clear</button>' : ''}</div>${rec || '<p class="muted small pad savedempty">Codes you open appear here (last ' + RECENT_MAX + ').</p>'}
       <div class="savedtools">
         <div class="saverow"><button type="button" class="ghost" id="expSaved" title="Save favourites &amp; recent codes to a file" aria-label="Save favourites &amp; recent codes to a file" aria-describedby="expHelp">Export</button><p class="small savedhelp" id="expHelp">Export saves your favourites and recent codes to a file so you can back them up or move them to another device.</p></div>
         <div class="saverow"><button type="button" class="ghost" id="impSaved" title="Load favourites &amp; recent codes from a saved file" aria-label="Load favourites &amp; recent codes from a saved file" aria-describedby="impHelp">Import</button><p class="small savedhelp" id="impHelp">Import loads that file back in. Nothing leaves your device unless you share the file.</p></div>
