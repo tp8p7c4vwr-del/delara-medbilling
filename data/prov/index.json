@@ -1,5 +1,5 @@
 {
- "built": "2026-10-03T19:20:13-06:00",
+ "built": "2026-10-03T19:32:38-06:00",
  "list": [
   {
    "id": "AB",
@@ -96,10 +96,15 @@
    "id": "SK",
    "name": "Saskatchewan",
    "group": "prov",
-   "status": "soon",
-   "message": "Coming soon - being prepared",
-   "why": "Parsing and spot-checking of the official schedule is in progress.",
-   "link": "https://www.saskatchewan.ca/business/health-care-administration-and-provider-resources/saskatchewan-health-insurance-plan-information-for-providers/payment-schedule-for-insured-services-provided-by-a-physician",
+   "status": "live",
+   "file": "SK.json",
+   "effective": "2026-10-01",
+   "effectiveLabel": "Effective 1 October 2026",
+   "counts": {
+    "rows": 3171,
+    "codes": 3156
+   },
+   "link": "https://www.saskatchewan.ca/government/health-care-administration-and-provider-resources/resources-for-health-care-businesses-and-career-development/establishing-and-operating-a-practice/physicians",
    "linkLabel": "Payment Schedule for Insured Services Provided by a Physician"
   },
   {
