@@ -1,5 +1,5 @@
 {
- "built": "2026-10-03T20:39:34-06:00",
+ "built": "2026-10-03T20:51:40-06:00",
  "list": [
   {
    "id": "AB",
@@ -37,10 +37,10 @@
    "name": "New Brunswick",
    "group": "prov",
    "status": "soon",
-   "message": "Coming soon - being prepared",
-   "why": "Parsing and spot-checking of the official schedule is in progress.",
+   "message": "Coming soon - awaiting permission to republish the official schedule",
+   "why": "The New Brunswick Physicians’ Manual is © Government of New Brunswick, all rights reserved; republishing it needs the Department of Health’s permission.",
    "link": "https://www2.gnb.ca/content/dam/gnb/Departments/h-s/pdf/en/Physicians/new_brunswick_physicians_manual.pdf",
-   "linkLabel": "New Brunswick Physicians' Manual"
+   "linkLabel": "New Brunswick Physicians’ Manual (gnb.ca, PDF)"
   },
   {
    "id": "NL",

@@ -321,9 +321,10 @@
   function rowAmount(r, sk) {
     const m = P.meta;
     if (m.feeModel === 'msu') {  // units only, exactly as printed (no dollar conversion)
-      const an = r.an ? `Anaes units ${r.an}` : '';
+      const an = r.an ? (r.an === 'TU' ? 'Anaes TU (time units)' : `Anaes units ${r.an}`) : '';
       if (!r.u) return { amount: null, label: r.an ? 'Anaesthetic units only' : 'See document', note: an };
-      return { amount: null, label: r.u === 'IC' ? 'Independent consideration' : `${r.u} units`, note: [r.u === 'IC' ? '' : 'Base units as printed', an].filter(Boolean).join(' · ') };
+      const pct = /%$/.test(r.u), vf = r.u === 'VF', ic = r.u === 'IC';
+      return { amount: null, label: ic ? 'Independent consideration' : vf ? 'VF (visit fee)' : pct ? r.u : `${r.u} units`, note: [ic || vf ? '' : pct ? 'Percentage as printed' : 'Base units as printed', an].filter(Boolean).join(' · ') };
     }
     if (m.pick) {
       const k = (m.pick[sk] || m.pick[m.defaultSkill]).find(x => r[x] != null);
