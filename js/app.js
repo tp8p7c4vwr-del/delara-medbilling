@@ -610,19 +610,20 @@
   }
 
   // ------------------------------------------------------------ favourites / recent view (home screen when the search is empty)
-  function savedRow(key) {
+  function savedRow(key) {   // one compact line: bold code, description truncated with an ellipsis, fee/badge, star
     const sk = splitKey(key), code = sk.code;
+    const line = (attrs, cls, cd, desc, right, title) => `<button class="hit compact${cls}" ${attrs}${title ? ` title="${esc(title)}"` : ''}><span class="ccode code">${esc(cd)}</span><span class="cdesc">${esc(desc)}</span>${right}${star(key)}</button>`;
     if (sk.jur !== JUR) {
       const j = JREG.find(x => x.id === sk.jur), nm = j ? j.name : sk.jur;
-      return `<button class="hit other" data-jur="${esc(sk.jur)}" data-${sk.t === 'H' ? 'code' : 'icd'}="${esc(code)}" title="Opens ${esc(nm)}"><div class="row1"><span class="lft"><span class="code">${esc(code)}</span>${star(key)}</span><span class="badge j">${esc(nm)}</span></div><div class="hdesc small muted">${sk.t === 'H' ? 'Fee code' : 'Diagnostic code'} saved under ${esc(nm)}. Tap to switch to ${esc(nm)}.</div></button>`;
+      return line(`data-jur="${esc(sk.jur)}" data-${sk.t === 'H' ? 'code' : 'icd'}="${esc(code)}"`, ' other', code, `${sk.t === 'H' ? 'Fee code' : 'Diagnostic code'} saved under ${nm}. Tap to switch to ${nm}.`, `<span class="badge j">${esc(nm)}</span>`, 'Opens ' + nm);
     }
     if (key[0] === 'H') {
       const c = BYCODE[code]; if (!c) return '';
       const f = feeFor(c);
-      return `<button class="hit${current === c.code ? ' sel' : ''}" data-code="${esc(c.code)}"><div class="row1"><span class="lft"><span class="code">${esc(c.display || c.code)}</span>${star(key)}</span><span class="fee">${f.amount == null ? esc(f.label) : money(f.amount)}</span></div><div class="hdesc">${esc(c.desc)}</div></button>`;
+      return line(`data-code="${esc(c.code)}"`, current === c.code ? ' sel' : '', c.display || c.code, c.desc, `<span class="fee">${f.amount == null ? esc(f.label) : money(f.amount)}</span>`, c.desc);
     }
     const i = ICDBY[code]; if (!i) return '';
-    return `<button class="hit" data-icd="${esc(i.code)}"><div class="row1"><span class="lft"><span class="code">${esc(i.code)}</span>${star(key)}</span><span class="small muted">ICD-9</span></div><div class="hdesc">${esc(icdLabel(i))}</div></button>`;
+    return line(`data-icd="${esc(i.code)}"`, '', i.code, icdLabel(i), '<span class="small muted">ICD-9</span>', icdLabel(i));
   }
   function renderSaved() {
     const box = $('#results'); box._ctx = null;
