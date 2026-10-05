@@ -188,3 +188,9 @@ html.jur-x .abonly,html.jur-soon .needdata,html.noskill .skill,html.noskill .ski
 .foot #srcnote{margin:4px 0;padding:4px 8px}.foot #srcnote p{margin:2px 0;line-height:1.35}
 .foot .feedback{margin:4px 0}.foot .copyright{margin-top:6px;padding:8px 12px}
 .savedempty{margin:2px 0 4px;padding:2px 12px;line-height:1.35;min-height:0}
+/* v26 compact Favourites / Recent rows */
+.hit.compact,#results .hit.compact{display:flex;align-items:center;gap:8px;padding:2px 4px 2px 10px;min-height:34px}
+.hit.compact .ccode{flex:0 0 auto;font-weight:700}
+.hit.compact .cdesc{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink)}
+.hit.compact .fee,.hit.compact .badge,.hit.compact .muted{flex:0 0 auto;white-space:nowrap;font-size:.85rem}
+.hit.compact .star{flex:0 0 auto;min-width:32px;min-height:32px;font-size:1.2rem}
