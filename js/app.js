@@ -7,6 +7,37 @@
   const money = n => n == null || isNaN(n) ? '—' : '$' + Number(n).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const LS = { get: (k, d) => { try { const v = localStorage.getItem('mb.' + k); return v == null ? d : v; } catch (e) { return d; } },
                set: (k, v) => { try { localStorage.setItem('mb.' + k, v); } catch (e) {} } };
+  // Shared handoff with MedBilling Logs (same origin). Never includes patient name/MRN.
+  const HO_KEY = 'medbilling.handoff.v1';
+  function hoPending(kind) {
+    try {
+      const h = JSON.parse(localStorage.getItem(HO_KEY) || 'null');
+      if (h && h.v === 1 && h.op === 'request' && h.from === 'logs' && (!kind || h.kind === kind)) return h;
+    } catch (e) {}
+    return null;
+  }
+  function sendToLogs(kind, code, desc) {
+    const req = hoPending(kind); if (!req || !code) return false;
+    try {
+      localStorage.setItem(HO_KEY, JSON.stringify({
+        v: 1, op: 'response', kind, code: String(code), desc: String(desc || ''),
+        encounterId: req.encounterId || '', field: req.field || '', from: 'feedesk', ts: Date.now()
+      }));
+      toast('Sent to MedBilling Logs — return to Logs to apply');
+      return true;
+    } catch (e) { return false; }
+  }
+  function logsHandoffBtn(kind, code, desc) {
+    if (!hoPending(kind)) return '';
+    return `<button type="button" class="primary" data-send-logs="${esc(kind)}" data-code="${esc(code)}" data-desc="${esc(desc || '')}">Use in Logs</button>`;
+  }
+  function bindLogsHandoff(root) {
+    if (!root) return;
+    root.querySelectorAll('[data-send-logs]').forEach(b => {
+      b.onclick = ev => { ev.preventDefault(); sendToLogs(b.dataset.sendLogs, b.dataset.code, b.dataset.desc); };
+    });
+  }
+
   // ---- Jurisdiction (province/territory) picked at the top; remembered on this device. Alberta is the default.
   const JUR = (v => /^[A-Z]{2}$/.test(v) ? v : 'AB')(LS.get('jur', 'AB'));
   // ---- Favourites and recent codes: kept on this device only (localStorage). Keys are 'H:<HSC>' or 'I:<ICD-9>' for Alberta,
@@ -378,7 +409,7 @@
         <div class="row1"><span class="code codebig">${esc(c.code)}</span>${star(hk(c.code))}${r0.ast ? '<span class="badge">*</span>' : ''}</div>
         <h2>${esc(r0.d)}</h2>${under}${markP}${modsP}
         <div class="pfee"><div class="fee big">${feeTxt(f)}</div><div class="small muted">${feeLabel}${f.note ? ' · ' + esc(f.note) : ''}${extra ? ' · ' + extra : ''}</div><div class="small eff">${esc(m.name)} · ${esc(m.effectiveLabel)}</div></div>
-        <div class="pbtns"><button type="button" class="ghost" id="pDoc" aria-expanded="false">Document</button><button type="button" class="ghost" id="askCode">Ask SI/AI</button><button type="button" class="ghost" id="pMore">More about this condition</button></div>
+        <div class="pbtns"><button type="button" class="ghost" id="pDoc" aria-expanded="false">Document</button><button type="button" class="ghost" id="askCode">Ask SI/AI</button><button type="button" class="ghost" id="pMore">More about this condition</button>${logsHandoffBtn('fee', c.code, c.desc)}</div>
         <div id="pDocs" class="links" hidden>${docLinks.join('') || '<span class="muted">No document page listed.</span>'}</div>
         ${c.rows.length > 1 ? `<details><summary>All listings (${c.rows.length})</summary>${rowsHtml}</details>` : ''}
         <h3>Suggested ${esc(dxName())}</h3><p class="small muted" id="icdsugbasis"></p><div id="icdsug" class="picklist"></div>${unitP}${cav}${credit}</div>`;
@@ -403,7 +434,7 @@
           ${extra ? `<div><div class="small muted">${r0.au != null && cols.au ? esc(cols.au) : 'Details'}</div><div class="fee">${r0.au != null && cols.au ? esc(r0.au) + (extraX ? ' · ' + extraX : '') : extraX}</div></div>` : ''}
           <div><div class="small muted">Effective</div><div class="eff">${esc(m.effectiveLabel)}</div></div>
         </div>
-        <div class="row"><button class="ghost" id="askCode">Ask SI/AI</button><button class="ghost" id="copyCode">Copy code</button></div>
+        <div class="row"><button class="ghost" id="askCode">Ask SI/AI</button><button class="ghost" id="copyCode">Copy code</button>${logsHandoffBtn('fee', c.code, r0.d || c.desc)}</div>
         <h3>In the official document</h3><div class="links">${docLinks.join('') || '<span class="muted">—</span>'}</div>
         <p class="small">Notes, rules and modifiers for this code are on the linked page and in the ${esc(m.title)} rules (<a href="#/rules">Rules tab</a>).</p>
         <h3>${c.rows.length > 1 ? 'All listings (' + c.rows.length + ')' : 'Listing'}</h3>${rowsHtml}
@@ -415,6 +446,8 @@
       if (!quiet && !window.matchMedia('(min-width:900px)').matches) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
     if (location.hash !== '#/code/' + c.code) history.replaceState(null, '', '#/code/' + c.code);
+    bindLogsHandoff(el);
+    if (!quiet) sendToLogs('fee', c.code, r0.d || c.desc);
   }
   const noDxMsg = () => P && P.meta.dx && P.meta.dx.note ? P.meta.dx.note : 'No diagnostic code list is bundled for this jurisdiction.';
   function renderDxScope() {
@@ -698,7 +731,7 @@
         ${skill !== 'BASE' && f.amount !== c.base && !c.byAssess ? `<div><div class="small muted">Schedule base</div><div class="fee">${money(c.base)}</div></div>` : ''}
         ${c.ane != null ? `<div><div class="small muted">Anaesthetic benefit (separate)</div><div class="fee">${money(c.ane)}</div></div>` : ''}
       </div>
-      <div class="row"><button class="ghost" id="askCode">Ask SI/AI</button><button class="ghost" id="copyCode">Copy HSC</button></div>
+      <div class="row"><button class="ghost" id="askCode">Ask SI/AI</button><button class="ghost" id="copyCode">Copy HSC</button>${logsHandoffBtn('fee', c.code, c.desc)}</div>
       ${call.length ? `<h3>For your description</h3><ul>${call.map(x => `<li>${x}</li>`).join('')}</ul>` : ''}
       ${c.notes ? `<h3>Notes</h3><p>${grLinks(c.notes)}</p>` : ''}
       ${c.gr && c.gr.length ? `<p class="small">Governing rules: ${c.gr.map(g => `<a href="#/rules/${g}">GR ${g}</a>`).join(', ')}</p>` : ''}
@@ -717,6 +750,8 @@
     { const sg = suggestIcd(c); $('#icdsugbasis').textContent = '(' + sg.basis + ')'; renderIcdList($('#icdsug'), sg.rows, sg.empty); }
     if (!quiet && !window.matchMedia('(min-width:900px)').matches) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     if (location.hash !== '#/code/' + code) history.replaceState(null, '', '#/code/' + code);
+    bindLogsHandoff(el);
+    if (!quiet) sendToLogs('fee', c.code, c.desc);
   }
 
   // Phone code card: fee, key notes collapsed, ICD-9 suggestions, Document / Ask AI / More about this condition.
@@ -728,7 +763,7 @@
       <h2>${esc(c.desc)}</h2>
       <div class="pfee"><div class="fee big">${f.amount == null ? esc(f.label) : money(f.amount)}</div>
         <div class="small muted">Schedule fee (${esc(skill === 'BASE' ? 'base' : skill)})${skill !== 'BASE' && f.amount !== c.base && !c.byAssess ? ' · base ' + money(c.base) : ''}${c.ane != null ? ' · anaesthetic ' + money(c.ane) + ' (separate)' : ''}</div></div>
-      <div class="pbtns"><button type="button" class="ghost" id="pDoc" aria-expanded="false">Document</button><button type="button" class="ghost" id="askCode">Ask SI/AI</button><button type="button" class="ghost" id="pMore">More about this condition</button></div>
+      <div class="pbtns"><button type="button" class="ghost" id="pDoc" aria-expanded="false">Document</button><button type="button" class="ghost" id="askCode">Ask SI/AI</button><button type="button" class="ghost" id="pMore">More about this condition</button>${logsHandoffBtn('fee', c.code, c.desc)}</div>
       <div id="pDocs" class="links" hidden>${docLinks.join('') || '<span class="muted">No document page listed.</span>'}</div>
       ${call.length ? `<details><summary>For your description</summary><ul>${call.map(x => `<li>${x}</li>`).join('')}</ul></details>` : ''}
       ${c.notes || (c.gr && c.gr.length) ? `<details><summary>Key notes</summary>${c.notes ? `<p>${grLinks(c.notes)}</p>` : ''}${c.gr && c.gr.length ? `<p class="small">Governing rules: ${c.gr.map(g => `<a href="#/rules/${g}">GR ${g}</a>`).join(', ')}</p>` : ''}</details>` : ''}
@@ -746,6 +781,8 @@
     $('.split').classList.add('showing');
     window.scrollTo(0, 0);
     if (location.hash !== '#/code/' + c.code) history.replaceState(null, '', '#/code/' + c.code);
+    bindLogsHandoff(el);
+    sendToLogs('fee', c.code, c.desc);
   }
 
   // ------------------------------------------------------------ ICD-9
@@ -1029,10 +1066,13 @@
     addRecent(ik(code));
     let sec = $('#tab-medres');
     if (!sec) { sec = document.createElement('section'); sec.id = 'tab-medres'; sec.className = 'tab'; $('#main').appendChild(sec); }
-    sec.innerHTML = `<div class="condhead"><div class="small muted">Medical resources</div><h2><span class="code">${esc(i.code)}</span>${star(ik(i.code))} ${esc(icdLabel(i))}</h2>
+    const dxDesc = icdLabel(i);
+    sec.innerHTML = `<div class="condhead"><div class="small muted">Medical resources</div><h2><span class="code">${esc(i.code)}</span>${star(ik(i.code))} ${esc(dxDesc)}</h2>
       <div class="small muted">${esc(i.block || '')}${i.excl ? ' · ' + esc(i.excl) : ''}</div>
-      <div class="row mt8"><button class="ghost" data-copy="${esc(i.code)}">Copy ${esc(dxName())}</button><button class="ghost" id="medBack">Back</button></div></div>` + topSourcesHtml(i) + resourcesHtml(i);
+      <div class="row mt8"><button class="ghost" data-copy="${esc(i.code)}">Copy ${esc(dxName())}</button>${logsHandoffBtn('dx', i.code, dxDesc)}<button class="ghost" id="medBack">Back</button></div></div>` + topSourcesHtml(i) + resourcesHtml(i);
     wireRegion(sec, i);
+    bindLogsHandoff(sec);
+    sendToLogs('dx', i.code, dxDesc);
     $('#medBack', sec).onclick = () => history.back();
     showTab('medres');
     window.scrollTo(0, 0);
