@@ -12,10 +12,11 @@
    "name": "British Columbia",
    "group": "prov",
    "status": "soon",
-   "message": "Coming soon - awaiting permission to republish the official schedule",
+   "message": "Permission to republish the official schedule has been requested. No fees are shown until it is granted.",
    "why": "The Province of British Columbia does not permit reproduction or redistribution of the MSC Payment Schedule without written permission.",
    "link": "https://www2.gov.bc.ca/gov/content/health/practitioner-professional-resources/msp/physicians/payment-schedules/msc-payment-schedule",
-   "linkLabel": "MSC Payment Schedule (gov.bc.ca)"
+   "linkLabel": "MSC Payment Schedule (gov.bc.ca)",
+   "pending": true
   },
   {
    "id": "MB",
@@ -37,10 +38,11 @@
    "name": "New Brunswick",
    "group": "prov",
    "status": "soon",
-   "message": "Coming soon - awaiting permission to republish the official schedule",
+   "message": "Permission to republish the official schedule has been requested. No fees are shown until it is granted.",
    "why": "The New Brunswick Physicians’ Manual is © Government of New Brunswick, all rights reserved; republishing it needs the Department of Health’s permission.",
    "link": "https://www2.gnb.ca/content/dam/gnb/Departments/h-s/pdf/en/Physicians/new_brunswick_physicians_manual.pdf",
-   "linkLabel": "New Brunswick Physicians’ Manual (gnb.ca, PDF)"
+   "linkLabel": "New Brunswick Physicians’ Manual (gnb.ca, PDF)",
+   "pending": true
   },
   {
    "id": "NL",
@@ -72,37 +74,41 @@
     "skipped": 2
    },
    "link": "https://msi.medavie.bluecross.ca/physicians-manual/",
-   "linkLabel": "MSI Physician’s Manual"
+   "linkLabel": "MSI Physician’s Manual",
+   "pending": true
   },
   {
    "id": "ON",
    "name": "Ontario",
    "group": "prov",
    "status": "soon",
-   "message": "Coming soon - awaiting permission to republish the official schedule",
+   "message": "Permission to republish the official schedule has been requested. No fees are shown until it is granted.",
    "why": "Ontario permits non-commercial reproduction of the Schedule of Benefits only without changes; a searchable re-presentation needs permission (copyright@ontario.ca).",
    "link": "https://www.ontario.ca/page/ohip-schedule-benefits-and-fees",
-   "linkLabel": "OHIP Schedule of Benefits and Fees (ontario.ca)"
+   "linkLabel": "OHIP Schedule of Benefits and Fees (ontario.ca)",
+   "pending": true
   },
   {
    "id": "PE",
    "name": "Prince Edward Island",
    "group": "prov",
    "status": "soon",
-   "message": "Coming soon - awaiting permission to republish the official schedule",
+   "message": "Permission to republish the official schedule has been requested. No fees are shown until it is granted.",
    "why": "Prince Edward Island permits one unmodified copy for non-commercial use; further copies need the Government of Prince Edward Island's permission (Copyright Permission Request Form).",
    "link": "https://www.princeedwardisland.ca/sites/default/files/publications/physician_services_agreement_2024-2029.pdf",
-   "linkLabel": "Physician Services Agreement 2024-2029 (princeedwardisland.ca, PDF)"
+   "linkLabel": "Physician Services Agreement 2024-2029 (princeedwardisland.ca, PDF)",
+   "pending": true
   },
   {
    "id": "QC",
    "name": "Quebec",
    "group": "prov",
    "status": "soon",
-   "message": "Coming soon - awaiting permission to republish the official schedule",
+   "message": "Permission to republish the official schedule has been requested. No fees are shown until it is granted.",
    "why": "Reproduction of the RAMQ manuals requires authorization from the Government of Québec.",
    "link": "https://www.ramq.gouv.qc.ca/fr/professionnels/medecins-specialistes/manuels/Pages/remuneration-acte.aspx",
-   "linkLabel": "RAMQ manuals: rémunération à l'acte (ramq.gouv.qc.ca)"
+   "linkLabel": "RAMQ manuals: rémunération à l'acte (ramq.gouv.qc.ca)",
+   "pending": true
   },
   {
    "id": "SK",

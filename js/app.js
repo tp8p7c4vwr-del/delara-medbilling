@@ -136,6 +136,9 @@
   let TOP, META, CODES, BYCODE = {}, RULES, RULEBY = {}, MODS, MODTYPE = {}, MODCODE = {}, EXPL, ICD, ICDBY = {}, BULL, BULLBY = {}, RES;
   let codeIndex, icdIndex;
   let JREG = [], JINFO = null, P = null;   // registry, this jurisdiction's registry entry, province data (null for Alberta)
+  // Display name: jurisdictions whose permission/licence is still pending carry "(approval pending)". Not used in SI/AI prompts.
+  const jn = j => j ? j.name + (j.pending ? ' (approval pending)' : '') : '';
+  const pn = () => P ? P.meta.name + ((P.meta.pending || (JINFO && JINFO.pending)) ? ' (approval pending)' : '') : '';
   const SKEY = JUR === 'AB' ? 'skill' : 'skill.' + JUR;
   let skill = LS.get(SKEY, JUR === 'AB' ? 'OBGY' : '');
   // ---- Phone/tablet mode: automatic on touch devices under 1024px wide or a mobile UA; user choice is remembered.
@@ -237,10 +240,10 @@
   }
   function initJur() {
     const sel = $('#jur'), chip = $('#jurChip'); if (!sel) return;
-    const opt = j => `<option value="${esc(j.id)}">${esc(j.name)}${j.status === 'live' ? '' : j.status === 'none' ? ' (no schedule)' : ' (coming soon)'}</option>`;
+    const opt = j => `<option value="${esc(j.id)}">${esc(jn(j))}${j.status === 'live' || j.pending ? '' : j.status === 'none' ? ' (no schedule)' : ' (coming soon)'}</option>`;
     sel.innerHTML = JREG.filter(j => j.group !== 'terr').map(opt).join('') + (JREG.some(j => j.group === 'terr') ? `<optgroup label="Territories">${JREG.filter(j => j.group === 'terr').map(opt).join('')}</optgroup>` : '');
     [sel, chip].forEach(x => { if (!x) return; x.innerHTML = sel.innerHTML; x.value = JUR; x.addEventListener('change', () => { if (x.value !== JUR) switchJur(x.value, ''); }); });
-    const ct = $('#jurChipText'); if (ct) ct.textContent = JINFO && JINFO.id === JUR ? JINFO.name : JUR;
+    const ct = $('#jurChipText'); if (ct) ct.textContent = JINFO && JINFO.id === JUR ? jn(JINFO) : JUR;
     const root = document.documentElement;
     root.classList.toggle('jur-x', JUR !== 'AB');
     root.classList.toggle('jur-soon', !!JINFO && JINFO.status !== 'live');
@@ -289,7 +292,7 @@
     route();
   }
   function applyJurLabels() {
-    const name = JINFO ? JINFO.name : JUR;
+    const name = JINFO ? jn(JINFO) : JUR;
     const q = $('#q'); if (q) { q.placeholder = P ? `Describe the service or enter a ${P.meta.codeLabel.toLowerCase()} code` : 'Fee codes coming soon'; q.setAttribute('aria-label', 'Service description or code'); }
     $$('[data-tab="price"]').forEach(b => b.textContent = 'Fee list');
     $$('[data-tab="icd9"]').forEach(b => b.textContent = P ? dxName() : 'Diagnostic codes');
@@ -308,13 +311,13 @@
   }
   function soonPanel() {
     const j = JINFO || {};
-    return `<div class="card soon"><h2>${esc(j.name || JUR)}</h2><p class="warn">${esc(j.message || 'Coming soon')}</p>${j.why ? `<p class="small">${esc(j.why)}</p>` : ''}
+    return `<div class="card soon"><h2>${esc(jn(j) || JUR)}</h2><p class="warn">${esc(j.message || '(approval pending)')}</p>${j.why ? `<p class="small">${esc(j.why)}</p>` : ''}
       ${j.link ? `<p><a target="_blank" rel="noopener noreferrer" href="${esc(j.link)}">${esc(j.linkLabel || 'Official source')}</a></p>` : ''}
       <p class="small muted">Choose another province or territory at the top. Alberta is the default.</p></div>`;
   }
   function footerOther() {
-    $('#dataline').innerHTML = P ? `Data: ${esc(P.meta.name)} ${esc(P.meta.title)}, ${esc(P.meta.effectiveLabel.replace(/^./, ch => ch.toLowerCase()))} · ${P.meta.counts.codes.toLocaleString()} codes · <a href="${esc(P.meta.pdf)}" target="_blank" rel="noopener noreferrer">PDF</a>`
-      : `${esc(JINFO ? JINFO.name : JUR)}: ${esc(JINFO ? JINFO.message : '')}`;
+    $('#dataline').innerHTML = P ? `Data: ${esc(pn())} ${esc(P.meta.title)}, ${esc(P.meta.effectiveLabel.replace(/^./, ch => ch.toLowerCase()))} · ${P.meta.counts.codes.toLocaleString()} codes · <a href="${esc(P.meta.pdf)}" target="_blank" rel="noopener noreferrer">PDF</a>`
+      : `${esc(JINFO ? jn(JINFO) : JUR)}: ${esc(JINFO ? JINFO.message : '')}`;
     const d = $('.foot .disclaimer'); if (d) d.textContent = P ? `Reference only; verify against the current ${P.meta.name} ${P.meta.title} before submitting claims.` : 'Reference only; verify against the official schedule before submitting claims.';
     renderSourceNote();
   }
@@ -330,7 +333,7 @@
     }
     if (P) {
       const m = P.meta;
-      return `<p class="small">Source: ${esc(m.publisher)}, ${esc(m.title)}, ${esc(m.effectiveLabel.replace(/^./, ch => ch.toLowerCase()))}. ${a(m.pdf, m.pdfGen ? m.pdfGen.label : 'Official PDF')} · ${a(m.landing, 'source page')}. Edition: ${esc(m.edition)}. Last checked by the app: ${esc(chk(m.checked))}.</p>
+      return `${(m.pending || (JINFO && JINFO.pending)) ? `<p class="small"><b>${esc(pn())}</b></p>` : ''}<p class="small">Source: ${esc(m.publisher)}, ${esc(m.title)}, ${esc(m.effectiveLabel.replace(/^./, ch => ch.toLowerCase()))}. ${a(m.pdf, m.pdfGen ? m.pdfGen.label : 'Official PDF')} · ${a(m.landing, 'source page')}. Edition: ${esc(m.edition)}. Last checked by the app: ${esc(chk(m.checked))}.</p>
         ${m.dx && m.dx.label ? `<p class="small">Diagnostic codes: ${esc(m.dx.label)}. ${m.dx.url ? a(m.dx.url, m.dx.urlLabel || 'source') : ''}</p>` : ''}
         ${m.licence ? `<p class="small">${esc(m.licence.text)}${m.licence.url ? ' ' + a(m.licence.url, 'Licence') : ''}</p>` : ''}
         ${m.credit ? `<p class="small">${esc(m.credit)}</p>` : ''}
@@ -338,7 +341,7 @@
         <p class="small muted">${esc(m.governs || 'Reference only. The official schedule governs if there is any difference.')}</p>`;
     }
     const j = JINFO || {};
-    return `<p class="small">${esc(j.name || '')}: ${esc(j.message || '')}. ${j.link ? a(j.link, j.linkLabel || 'Official source') : ''}</p><p class="small muted">No ${esc(j.name || '')} fees are shown in this app. The official schedule governs.</p>`;
+    return `<p class="small">${esc(jn(j))}: ${esc(j.message || '')} ${j.link ? a(j.link, j.linkLabel || 'Official source') : ''}</p><p class="small muted">No ${esc(j.name || '')} fees are shown in this app. The official schedule governs.</p>`;
   }
   function renderSourceNote() { const el = $('#srcnote'); if (el) el.innerHTML = sourceNoteHtml(); }
   // ---- fees
@@ -408,7 +411,7 @@
         <button type="button" class="ghost back" id="pBack">‹ Results</button>
         <div class="row1"><span class="code codebig">${esc(c.code)}</span>${star(hk(c.code))}${r0.ast ? '<span class="badge">*</span>' : ''}</div>
         <h2>${esc(r0.d)}</h2>${under}${markP}${modsP}
-        <div class="pfee"><div class="fee big">${feeTxt(f)}</div><div class="small muted">${feeLabel}${f.note ? ' · ' + esc(f.note) : ''}${extra ? ' · ' + extra : ''}</div><div class="small eff">${esc(m.name)} · ${esc(m.effectiveLabel)}</div></div>
+        <div class="pfee"><div class="fee big">${feeTxt(f)}</div><div class="small muted">${feeLabel}${f.note ? ' · ' + esc(f.note) : ''}${extra ? ' · ' + extra : ''}</div><div class="small eff">${esc(pn() || m.name)} · ${esc(m.effectiveLabel)}</div></div>
         <div class="pbtns"><button type="button" class="ghost" id="pDoc" aria-expanded="false">Document</button><button type="button" class="ghost" id="askCode">Ask SI/AI</button><button type="button" class="ghost" id="pMore">More about this condition</button>${logsHandoffBtn('fee', c.code, c.desc)}</div>
         <div id="pDocs" class="links" hidden>${docLinks.join('') || '<span class="muted">No document page listed.</span>'}</div>
         ${c.rows.length > 1 ? `<details><summary>All listings (${c.rows.length})</summary>${rowsHtml}</details>` : ''}
@@ -426,7 +429,7 @@
       $('.split').classList.remove('showing');
       el.innerHTML = `
         ${m.skills.length ? `<div class="mobileskill">${esc(m.skillLabel)} <select class="skillsel" aria-label="${esc(m.skillLabel)}"></select></div>` : ''}
-        <div class="row1"><span class="code codebig">${esc(c.code)}</span>${star(hk(c.code))}${r0.ast ? '<span class="badge" title="Asterisked procedure (see Rule of Application 21)">*</span>' : ''}<span class="badge j">${esc(m.name)}</span></div>
+        <div class="row1"><span class="code codebig">${esc(c.code)}</span>${star(hk(c.code))}${r0.ast ? '<span class="badge" title="Asterisked procedure (see Rule of Application 21)">*</span>' : ''}<span class="badge j">${esc(pn() || m.name)}</span></div>
         <h2>${esc(r0.d)}</h2>${under}${markP}${modsP}
         <div class="small muted">${esc([r0.sn, r0.hn].filter(Boolean).join(' › '))}</div>
         <div class="feeblock">
@@ -452,7 +455,7 @@
   const noDxMsg = () => P && P.meta.dx && P.meta.dx.note ? P.meta.dx.note : 'No diagnostic code list is bundled for this jurisdiction.';
   function renderDxScope() {
     const el = $('#icdscope');
-    if (!P) { el.textContent = JINFO ? JINFO.name + ': ' + JINFO.message + '.' : ''; return; }
+    if (!P) { el.textContent = JINFO ? jn(JINFO) + ': ' + JINFO.message : ''; return; }
     const d = P.meta.dx;
     el.innerHTML = ICD.length ? `${esc(P.meta.name)}: ${esc(d.label)}, ${ICD.length.toLocaleString()} codes. ${esc(d.note || '')} ${d.url ? `<a target="_blank" rel="noopener noreferrer" href="${esc(d.url)}">${esc(d.urlLabel || 'Source')}</a>` : ''}`
       : `${esc(d.note || noDxMsg())} ${d.url ? `<a target="_blank" rel="noopener noreferrer" href="${esc(d.url)}">${esc(d.urlLabel || 'Official source')}</a>` : ''}`;
@@ -647,7 +650,7 @@
     const sk = splitKey(key), code = sk.code;
     const line = (attrs, cls, cd, desc, right, title) => `<button class="hit compact${cls}" ${attrs}${title ? ` title="${esc(title)}"` : ''}><span class="ccode code">${esc(cd)}</span><span class="cdesc">${esc(desc)}</span>${right}${star(key)}</button>`;
     if (sk.jur !== JUR) {
-      const j = JREG.find(x => x.id === sk.jur), nm = j ? j.name : sk.jur;
+      const j = JREG.find(x => x.id === sk.jur), nm = j ? jn(j) : sk.jur;
       return line(`data-jur="${esc(sk.jur)}" data-${sk.t === 'H' ? 'code' : 'icd'}="${esc(code)}"`, ' other', code, `${sk.t === 'H' ? 'Fee code' : 'Diagnostic code'} saved under ${nm}. Tap to switch to ${nm}.`, `<span class="badge j">${esc(nm)}</span>`, 'Opens ' + nm);
     }
     if (key[0] === 'H') {
@@ -1037,7 +1040,7 @@
   function renderResources() {
     const el = $('#resources');
     el.innerHTML = `<div class="condhead"><h2>Resources</h2><p class="small muted">Clinical and guideline sources by region. Open “More about this condition” on any diagnostic code for condition-specific searches.</p></div>` + resourcesHtml(null) +
-      `<div class="card srccard"><h3>Source and credits: ${esc(JINFO ? JINFO.name : 'Alberta')}</h3>${sourceNoteHtml()}</div>`;
+      `<div class="card srccard"><h3>Source and credits: ${esc(JINFO ? jn(JINFO) : 'Alberta')}</h3>${sourceNoteHtml()}</div>`;
     wireRegion(el, null);
   }
   // Top sources: ICD-9 range -> specialty -> ranked top 10 sites and top 10 journals (curated, data/top-sources.json).
