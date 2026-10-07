@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>Privacy Policy · MedBilling Fee Desk</title>
@@ -13,7 +13,8 @@
 :root{--teal:#0f766e;--teal-d:#115e59;--ink:#1f2933;--muted:#64748b;--bg:#eef1f4;--warn:#92400e;--warnbg:#fffbeb}
 *{box-sizing:border-box}
 body{margin:0;font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink)}
-header{background:var(--teal);color:#fff;padding:14px 16px}
+[id]{scroll-margin-top:76px}
+header{background:var(--teal);color:#fff;padding:calc(14px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) 14px calc(16px + env(safe-area-inset-left));position:sticky;top:0;z-index:5}
 header a{color:#fff;text-decoration:none;font-weight:700;display:inline-flex;align-items:center;gap:8px}
 header img{border-radius:8px;background:#fff}
 main{max-width:760px;margin:0 auto;padding:8px 16px 32px}
@@ -109,8 +110,7 @@ details p{margin:.5em 0 .3em}
 <p>Each jurisdiction's source, edition and licence or credit line is shown in the app footer and on the Resources tab.</p>
 <ul>
 <li><strong>Open or published licences (live):</strong> Alberta (Open Government Licence – Alberta), Manitoba (OpenMB Information and Data Use Licence), Saskatchewan, Yukon, Northwest Territories and Newfoundland and Labrador (each government's published reproduction terms; non-commercial where those terms require it).</li>
-<li><strong>Nova Scotia (approval pending):</strong> live in the app. It is reproduced under Nova Scotia's published copyright terms, which allow non-commercial reproduction if the source and Crown copyright are acknowledged, the materials are not modified, the reproduction is accurate, and it is not represented as official or endorsed. A licence request for this searchable reference is pending. Nova Scotia data may be changed or removed at any time if the Province asks.</li>
-<li><strong>British Columbia (approval pending), Ontario (approval pending), Quebec (approval pending), Prince Edward Island (approval pending) and New Brunswick (approval pending):</strong> no fees or schedule text from these jurisdictions are shown. The app links to their official sources until permission is granted.</li>
+<li><strong>Nova Scotia (approval pending), British Columbia (approval pending), Ontario (approval pending), Quebec (approval pending), Prince Edward Island (approval pending) and New Brunswick (approval pending):</strong> no fees, codes or schedule text from these jurisdictions are shown. The app links to their official sources until permission is granted.</li>
 <li>Nunavut has no current published physician fee schedule.</li>
 </ul>
 

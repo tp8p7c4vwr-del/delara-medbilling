@@ -64,17 +64,11 @@
    "id": "NS",
    "name": "Nova Scotia",
    "group": "prov",
-   "status": "live",
-   "file": "NS.json",
-   "effective": "2026-04-01",
-   "effectiveLabel": "Manual of July 2026 (units as printed)",
-   "counts": {
-    "rows": 5663,
-    "codes": 2992,
-    "skipped": 2
-   },
+   "status": "soon",
+   "message": "Permission to republish the official schedule has been requested. No fees are shown until it is granted.",
+   "why": "Nova Scotia's copyright terms allow non-commercial copies only if the materials are not modified; a searchable re-presentation of the MSI Physician’s Manual needs the Province's permission, which has been requested.",
    "link": "https://msi.medavie.bluecross.ca/physicians-manual/",
-   "linkLabel": "MSI Physician’s Manual",
+   "linkLabel": "MSI Physician’s Manual (msi.medavie.bluecross.ca)",
    "pending": true
   },
   {

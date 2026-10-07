@@ -322,7 +322,16 @@
     renderSourceNote();
   }
   // Source footnote: publisher, document, edition/effective date, link, last checked, required licence/credit wording.
+  // ICD-9-CM (U.S. CMS/NCHS) credit, shown wherever the CMS list is the bundled diagnostic list; app-wide non-endorsement line.
+  const ICD9CM_CREDIT = 'https://www.cms.gov/medicare/coding-billing/icd-10-codes/icd-9-cm-diagnosis-procedure-codes-abbreviated-and-full-code-titles';
+  const NOT_OFFICIAL = 'Not an official version; not affiliated with or endorsed by any government.';
   function sourceNoteHtml() {
+    const a = (u, t) => `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(t)}</a>`;
+    const icdcm = P && P.meta.dx && P.meta.dx.file === 'dx-icd9cm.json'
+      ? `<p class="small icdcredit">ICD-9-CM diagnostic codes: version 32, U.S. Centers for Medicare &amp; Medicaid Services (CMS) and National Center for Health Statistics (NCHS, CDC); U.S. public domain, available free at ${a(ICD9CM_CREDIT, 'cms.gov')}. Use does not imply endorsement by CMS, CDC, HHS or the U.S. Government.</p>` : '';
+    return sourceNoteBody() + icdcm + `<p class="small notofficial">${esc(NOT_OFFICIAL)}</p>`;
+  }
+  function sourceNoteBody() {
     const a = (u, t) => `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(t)}</a>`;
     const chk = iso => iso ? fmtDate(iso.slice(0, 10)) : '';
     if (JUR === 'AB' && META && META.sombEffective) {
@@ -646,8 +655,16 @@
   }
 
   // ------------------------------------------------------------ favourites / recent view (home screen when the search is empty)
+  // Saved codes from a jurisdiction whose data is not served (permission pending) are never shown; one line per jurisdiction says so.
+  const heldJur = id => { if (id === 'AB') return false; const j = JREG.find(x => x.id === id); return !j || j.status !== 'live'; };
+  function heldSavedRows(list) {
+    const by = {}; list.forEach(k => { const id = splitKey(k).jur; if (heldJur(id)) by[id] = (by[id] || 0) + 1; });
+    return Object.keys(by).map(id => { const j = JREG.find(x => x.id === id), n = by[id];
+      return `<div class="hit compact heldsaved"><span class="cdesc">${esc(j ? jn(j) : id)}: ${n} saved code${n > 1 ? 's' : ''} hidden until permission is granted.</span><button type="button" class="linkbtn" data-dropheld="${esc(id)}">Remove</button></div>`; }).join('');
+  }
   function savedRow(key) {   // one compact line: bold code, description truncated with an ellipsis, fee/badge, star
     const sk = splitKey(key), code = sk.code;
+    if (heldJur(sk.jur)) return '';
     const line = (attrs, cls, cd, desc, right, title) => `<button class="hit compact${cls}" ${attrs}${title ? ` title="${esc(title)}"` : ''}><span class="ccode code">${esc(cd)}</span><span class="cdesc">${esc(desc)}</span>${right}${star(key)}</button>`;
     if (sk.jur !== JUR) {
       const j = JREG.find(x => x.id === sk.jur), nm = j ? jn(j) : sk.jur;
@@ -663,7 +680,7 @@
   }
   function renderSaved() {
     const box = $('#results'); box._ctx = null;
-    const fav = FAVS.map(savedRow).filter(Boolean).join(''), rec = RECENT.map(savedRow).filter(Boolean).join('');
+    const fav = FAVS.map(savedRow).filter(Boolean).join('') + heldSavedRows(FAVS), rec = RECENT.map(savedRow).filter(Boolean).join('') + heldSavedRows(RECENT);
     const sk = esc(skill === 'BASE' ? 'base' : skill);
     box.innerHTML = (JINFO && JINFO.status !== 'live' ? soonPanel() : '') + `<div class="savedh" id="savedFav"><h3>★ Favourites</h3></div>${fav || '<p class="muted small pad savedempty">Tap ☆ on any code to keep it here.</p>'}
       <div class="savedh" id="savedRecent"><h3>Recent</h3>${rec ? '<button type="button" class="linkbtn" id="clearRecent">Clear</button>' : ''}</div>${rec || '<p class="muted small pad savedempty">Codes you open appear here (last ' + RECENT_MAX + ').</p>'}
@@ -1037,10 +1054,17 @@
     s.value = region;
     s.onchange = () => { region = s.value; LS.set('region', region); if (icd) showMedRes(icd.code); else renderResources(); };
   }
+  function aboutHtml() {
+    const L = (u, t) => `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(t)}</a>`;
+    return `<div class="card aboutcard"><h3>About MedBilling Fee Desk</h3>
+      <p class="small">An independent reference tool made by Dr. Jose F de Lara. ${esc(NOT_OFFICIAL)} Fee schedules change; always confirm codes, fees and rules in the current official schedule before you submit a claim.</p>
+      <p class="aboutlinks">${L('https://tp8p7c4vwr-del.github.io/delara-medbilling/privacy.html', 'Privacy policy')} · ${L('https://tp8p7c4vwr-del.github.io/delara-medbilling/terms.html', 'Terms of use')} · ${L('https://tp8p7c4vwr-del.github.io/delara-medbilling/support.html', 'Support')} · <a href="licences.html">Open-source licences</a></p>
+      <p class="small muted">Suggest a change: <a href="mailto:delaramedbilling@gmail.com?subject=MedBilling%20Fee%20Desk%20feedback">delaramedbilling@gmail.com</a>. Do not include patient details.</p></div>`;
+  }
   function renderResources() {
     const el = $('#resources');
     el.innerHTML = `<div class="condhead"><h2>Resources</h2><p class="small muted">Clinical and guideline sources by region. Open “More about this condition” on any diagnostic code for condition-specific searches.</p></div>` + resourcesHtml(null) +
-      `<div class="card srccard"><h3>Source and credits: ${esc(JINFO ? jn(JINFO) : 'Alberta')}</h3>${sourceNoteHtml()}</div>`;
+      `<div class="card srccard"><h3>Source and credits: ${esc(JINFO ? jn(JINFO) : 'Alberta')}</h3>${sourceNoteHtml()}</div>` + aboutHtml();
     wireRegion(el, null);
   }
   // Top sources: ICD-9 range -> specialty -> ranked top 10 sites and top 10 journals (curated, data/top-sources.json).
@@ -1255,7 +1279,7 @@
 
   function wire() {
     $('#moreBtn').addEventListener('click', e => { e.stopPropagation(); const m = $('#moreMenu'); m.hidden = !m.hidden; $('#moreBtn').setAttribute('aria-expanded', String(!m.hidden)); });
-    $('#moreMenu').addEventListener('click', e => { const b = e.target.closest('button[data-tab]'); if (!b) return; closeMore(); if (b.dataset.tab === 'procedures') { goHome(); return; } showTab(b.dataset.tab); history.replaceState(null, '', '#/' + b.dataset.tab); window.scrollTo(0, 0); });
+    $('#moreMenu').addEventListener('click', e => { if (e.target.closest('a[href]')) { closeMore(); return; } const b = e.target.closest('button[data-tab]'); if (!b) return; closeMore(); if (b.dataset.tab === 'procedures') { goHome(); return; } showTab(b.dataset.tab); history.replaceState(null, '', '#/' + b.dataset.tab); window.scrollTo(0, 0); });
     document.addEventListener('click', e => { if (!e.target.closest('.morewrap')) closeMore(); });
     $('#layoutToggle').addEventListener('click', () => {
       LS.set('layout', phone ? 'desktop' : 'phone'); applyLayout();
@@ -1271,6 +1295,9 @@
     clr.addEventListener('click', () => { q.value = ''; clr.hidden = true; doSearch(''); q.focus(); });
     $('#limitSkill').addEventListener('change', () => lastQuery && doSearch(lastQuery, true));
     $('#results').addEventListener('click', e => {
+      const dh = e.target.closest('[data-dropheld]');
+      if (dh) { const id = dh.dataset.dropheld, m = k => splitKey(k).jur === id; FAVS = FAVS.filter(k => !m(k)); RECENT = RECENT.filter(k => !m(k));
+        Object.keys(TS.f).forEach(k => { if (m(k)) delete TS.f[k]; }); Object.keys(TS.r).forEach(k => { if (m(k)) delete TS.r[k]; }); saveLists(); renderSaved(); toast('Hidden codes removed'); return; }
       if (e.target.closest('#clearRecent')) { RECENT = []; TS.r = {}; saveLists(); renderSaved(); toast('Recent codes cleared'); return; }
       if (e.target.closest('#expSaved')) { exportSaved(); return; }
       if (e.target.closest('#impSaved')) { const f = $('#impFile'); f.value = ''; f.click(); return; }

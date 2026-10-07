@@ -197,3 +197,10 @@ html.jur-x .abonly,html.jur-soon .needdata,html.noskill .skill,html.noskill .ski
 
 /* v28 privacy/support links */
 .foot .legal{margin:6px 0 2px;text-align:center;font-size:.8rem}
+
+/* v31 About/legal links in the More menu and Resources */
+.menu a.menulink{display:block;padding:9px 12px;border-radius:8px;font-size:.95rem;color:var(--teal-d,#0b5f59);text-decoration:none}
+.menu a.menulink.first{border-top:1px solid #e5e7eb;margin-top:4px;padding-top:11px}
+.aboutcard{margin-top:12px}.aboutcard .aboutlinks{margin:6px 0;font-weight:600}
+.srcnote .notofficial,.srccard .notofficial{font-weight:600}
+.hit.heldsaved{display:flex;align-items:center;gap:10px;cursor:default;color:var(--muted,#64748b);font-size:.85rem}.hit.heldsaved .cdesc{white-space:normal}.hit.heldsaved .linkbtn{margin-left:auto;flex:0 0 auto}
