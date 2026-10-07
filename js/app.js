@@ -7,39 +7,112 @@
   const money = n => n == null || isNaN(n) ? '—' : '$' + Number(n).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const LS = { get: (k, d) => { try { const v = localStorage.getItem('mb.' + k); return v == null ? d : v; } catch (e) { return d; } },
                set: (k, v) => { try { localStorage.setItem('mb.' + k, v); } catch (e) {} } };
-  // Shared handoff with MedBilling Logs (same origin). Never includes patient name/MRN.
-  const HO_KEY = 'medbilling.handoff.v1';
-  function hoPending(kind) {
+  // ---- Pick mode for MedBilling Logs (v33). Logs opens Fee Desk with ?pick=hsc|dx&ctx=<token>&return=<Logs URL>[&jur=XX].
+  // Tapping a code then sends it straight back to the spreadsheet cell it was picked for. Only the code, its kind and the
+  // one-time token travel; no patient data ever comes here. The return address must be MedBilling Logs on this same origin
+  // (or the MedBilling Logs app's own mblogs://pick link): anything else is ignored, so this can't be used as an open redirect.
+  const PICK = (() => {
+    const SK = 'mb.pick.v1', TTL = 30 * 60000, TOK = /^[a-f0-9]{32}$/;
+    function okReturn(r) {
+      let u; try { u = new URL(r); } catch (e) { return null; }
+      if (u.href === 'mblogs://pick') return { href: 'mblogs://pick', native: true };
+      if (u.origin !== location.origin || u.username || u.password || u.search || u.hash) return null;
+      if (!/^\/medbilling-logs\/(index\.html)?$/.test(u.pathname)) return null;
+      return { href: u.origin + u.pathname, native: false };
+    }
+    let cur = null;
     try {
-      const h = JSON.parse(localStorage.getItem(HO_KEY) || 'null');
-      if (h && h.v === 1 && h.op === 'request' && h.from === 'logs' && (!kind || h.kind === kind)) return h;
-    } catch (e) {}
-    return null;
-  }
-  function sendToLogs(kind, code, desc) {
-    const req = hoPending(kind); if (!req || !code) return false;
-    try {
-      localStorage.setItem(HO_KEY, JSON.stringify({
-        v: 1, op: 'response', kind, code: String(code), desc: String(desc || ''),
-        encounterId: req.encounterId || '', field: req.field || '', from: 'feedesk', ts: Date.now()
-      }));
-      toast('Sent to MedBilling Logs — return to Logs to apply');
-      return true;
-    } catch (e) { return false; }
-  }
-  function logsHandoffBtn(kind, code, desc) {
-    if (!hoPending(kind)) return '';
-    return `<button type="button" class="primary" data-send-logs="${esc(kind)}" data-code="${esc(code)}" data-desc="${esc(desc || '')}">Use in Logs</button>`;
-  }
-  function bindLogsHandoff(root) {
-    if (!root) return;
-    root.querySelectorAll('[data-send-logs]').forEach(b => {
-      b.onclick = ev => { ev.preventDefault(); sendToLogs(b.dataset.sendLogs, b.dataset.code, b.dataset.desc); };
+      const sp = new URLSearchParams(location.search);
+      if (sp.has('pick') || sp.has('ctx') || sp.has('return')) {
+        const kind = sp.get('pick'), ctx = sp.get('ctx') || '', ret = okReturn(sp.get('return') || ''), jur = (sp.get('jur') || '').toUpperCase();
+        if ((kind === 'hsc' || kind === 'dx') && TOK.test(ctx) && ret) {
+          cur = { kind, ctx, ret: ret.href, native: ret.native, jur: /^[A-Z]{2}$/.test(jur) ? jur : '', t: Date.now() };
+          try { sessionStorage.setItem(SK, JSON.stringify(cur)); } catch (e) {}
+        } else { cur = null; try { sessionStorage.removeItem(SK); } catch (e) {} }
+        ['pick', 'ctx', 'return', 'jur'].forEach(k => sp.delete(k));
+        const qs = sp.toString(); history.replaceState(null, '', location.pathname + (qs ? '?' + qs : '') + location.hash);
+      } else {
+        const o = JSON.parse(sessionStorage.getItem(SK) || 'null');
+        if (o && TOK.test(o.ctx || '') && okReturn(o.ret) && (o.kind === 'hsc' || o.kind === 'dx') && Date.now() - o.t < TTL) cur = o; else sessionStorage.removeItem(SK);
+      }
+    } catch (e) { cur = null; }
+    return {
+      get: () => cur && Date.now() - cur.t < TTL ? cur : null,
+      clear: () => { cur = null; try { sessionStorage.removeItem(SK); } catch (e) {} },
+      setJur: id => { if (!cur) return; cur.jur = id; try { sessionStorage.setItem(SK, JSON.stringify(cur)); } catch (e) {} },
+      okReturn
+    };
+  })();
+  const PICK_CODE = /^[A-Z0-9][A-Z0-9.\-]{0,11}$/;
+  const pickBC = (() => { try { return 'BroadcastChannel' in window ? new BroadcastChannel('medbilling-pick') : null; } catch (e) { return null; } })();
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  // ask a MedBilling Logs tab that is still open (same browser) to take the code; resolves true when it confirms
+  function pickAsk(msg, ms) {
+    return new Promise(res => {
+      if (!pickBC) return res(false);
+      const t = setTimeout(() => { pickBC.removeEventListener('message', on); res(false); }, ms);
+      function on(ev) { const d = ev.data || {}; if (d.type === 'ack' && d.ctx === msg.ctx) { clearTimeout(t); pickBC.removeEventListener('message', on); res(true); } }
+      pickBC.addEventListener('message', on); pickBC.postMessage(msg);
     });
   }
+  let pickSending = false;
+  async function pickReturn(type, code, kind) {
+    const p = PICK.get(); if (!p || pickSending) return false;
+    pickSending = true; PICK.clear(); pickBar();
+    const q = type === 'pick' ? `?picked=${encodeURIComponent(code)}&kind=${kind}&ctx=${p.ctx}` : `?pickcancel=1&ctx=${p.ctx}`;
+    if (p.native) { location.href = p.ret + q; return true; }   // the app's own link; it reopens MedBilling Logs
+    const msg = type === 'pick' ? { type: 'pick', ctx: p.ctx, code, kind, t: Date.now() } : { type: 'cancel', ctx: p.ctx, t: Date.now() };
+    try { localStorage.setItem('medbilling.pick.v1', JSON.stringify(msg)); } catch (e) {}
+    const ack = await pickAsk(msg, 600);
+    if (ack) {   // the Logs tab has it: close this tab and go back there
+      try { if (window.opener && !window.opener.closed) window.opener.focus(); } catch (e) {}
+      try { window.close(); } catch (e) {}
+      await sleep(400);
+      if (window.closed) return true;
+      // the window could not close itself (e.g. the in-app browser of a Home Screen app): the code is already in
+      // MedBilling Logs, so don't reload it (that would lock it); say so and offer the way back
+      pickSent(type === 'pick' ? code : '', p.ret);
+      return true;
+    }
+    location.replace(p.ret + q);
+    return true;
+  }
+  function pickSent(code, ret) {
+    const b = document.createElement('div'); b.id = 'pickbar'; b.className = 'pickbar sent'; b.setAttribute('role', 'status');
+    b.innerHTML = `<span class="pbtxt">${code ? `${esc(code)} is in MedBilling Logs. Close this page (Done) to go back` : 'Pick cancelled. Close this page (Done) to go back'}</span><span class="pbsep" aria-hidden="true"> · </span><button type="button" class="pbcancel" id="pickBack">Back</button>`;
+    const old = document.getElementById('pickbar'); if (old) old.remove();
+    document.documentElement.classList.add('picking'); document.body.insertBefore(b, document.body.firstChild);
+    b.querySelector('#pickBack').addEventListener('click', () => location.replace(ret));
+  }
+  function sendPick(code, kind) {
+    code = String(code || '').trim().toUpperCase();
+    if (!PICK.get() || !PICK_CODE.test(code) || (kind !== 'hsc' && kind !== 'dx')) return false;
+    toast(`Sending ${code} to MedBilling Logs…`);
+    pickReturn('pick', code, kind);
+    return true;
+  }
+  function pickBar() {
+    const p = PICK.get(); document.documentElement.classList.toggle('picking', !!p);
+    document.documentElement.classList.toggle('picking-dx', !!p && p.kind === 'dx');
+    let b = document.getElementById('pickbar');
+    if (!p) { if (b) b.remove(); return; }
+    if (!b) {
+      b = document.createElement('div'); b.id = 'pickbar'; b.className = 'pickbar'; b.setAttribute('role', 'status');
+      b.innerHTML = '<span class="pbtxt">Picking a code for MedBilling Logs, tap a code to send it back</span><span class="pbsep" aria-hidden="true"> · </span><button type="button" id="pickCancel" class="pbcancel">Cancel</button>';
+      document.body.insertBefore(b, document.body.firstChild);
+      b.querySelector('#pickCancel').addEventListener('click', () => pickReturn('cancel'));
+    }
+  }
+  // "Use … in MedBilling Logs" button on a code page (only in pick mode)
+  function pickBtn(kind, code) {
+    if (!PICK.get()) return '';
+    return `<button type="button" class="primary pickuse" data-pick="${esc(kind)}" data-code="${esc(code)}">Use ${esc(code)} in MedBilling Logs</button>`;
+  }
+  // small "Details" chip on a search result while picking a fee code (tapping the rest of the row sends the code)
+  const pickDet = () => { const p = PICK.get(); return p && p.kind === 'hsc' ? '<span class="pdet" role="button" tabindex="0" aria-label="Show details">Details</span>' : ''; };
 
   // ---- Jurisdiction (province/territory) picked at the top; remembered on this device. Alberta is the default.
-  const JUR = (v => /^[A-Z]{2}$/.test(v) ? v : 'AB')(LS.get('jur', 'AB'));
+  const JUR = (v => /^[A-Z]{2}$/.test(v) ? v : 'AB')((PICK.get() && PICK.get().jur) || LS.get('jur', 'AB'));   // pick mode: Logs' province for this visit only
   // ---- Favourites and recent codes: kept on this device only (localStorage). Keys are 'H:<HSC>' or 'I:<ICD-9>' for Alberta,
   // 'H:<JUR>|<code>' / 'I:<JUR>|<code>' for other jurisdictions (Alberta keys are unchanged from earlier versions).
   const hk = code => JUR === 'AB' ? 'H:' + code : 'H:' + JUR + '|' + code;
@@ -234,7 +307,7 @@
   const chipText = v => P ? ((P.meta.skills.find(x => x.code === v) || {}).name || v || '').replace(/\s*\([^)]*\)\s*$/, '').replace(/^Visits\/Examinations—/, '').slice(0, 22) : v === 'BASE' ? 'Base' : v;
   const pdfLink = (p, l, txt) => P && P.meta.pdf && p ? `<a target="_blank" rel="noopener noreferrer" href="${esc(P.meta.pdf)}${P.meta.pdfGen ? '' : '#page=' + p}">${esc(txt || P.meta.title + ' p. ' + (l || p))}</a>` : '';
   function switchJur(id, hash) {
-    LS.set('jur', id);
+    LS.set('jur', id); PICK.setJur(id);
     location.href = location.pathname + location.search + (hash || '');
     if (hash) setTimeout(() => location.reload(), 50);
   }
@@ -421,7 +494,7 @@
         <div class="row1"><span class="code codebig">${esc(c.code)}</span>${star(hk(c.code))}${r0.ast ? '<span class="badge">*</span>' : ''}</div>
         <h2>${esc(r0.d)}</h2>${under}${markP}${modsP}
         <div class="pfee"><div class="fee big">${feeTxt(f)}</div><div class="small muted">${feeLabel}${f.note ? ' · ' + esc(f.note) : ''}${extra ? ' · ' + extra : ''}</div><div class="small eff">${esc(pn() || m.name)} · ${esc(m.effectiveLabel)}</div></div>
-        <div class="pbtns"><button type="button" class="ghost" id="pDoc" aria-expanded="false">Document</button><button type="button" class="ghost" id="askCode">Ask SI/AI</button><button type="button" class="ghost" id="pMore">More about this condition</button>${logsHandoffBtn('fee', c.code, c.desc)}</div>
+        <div class="pbtns"><button type="button" class="ghost" id="pDoc" aria-expanded="false">Document</button><button type="button" class="ghost" id="askCode">Ask SI/AI</button><button type="button" class="ghost" id="pMore">More about this condition</button></div>${pickBtn('hsc', c.code)}
         <div id="pDocs" class="links" hidden>${docLinks.join('') || '<span class="muted">No document page listed.</span>'}</div>
         ${c.rows.length > 1 ? `<details><summary>All listings (${c.rows.length})</summary>${rowsHtml}</details>` : ''}
         <h3>Suggested ${esc(dxName())}</h3><p class="small muted" id="icdsugbasis"></p><div id="icdsug" class="picklist"></div>${unitP}${cav}${credit}</div>`;
@@ -446,7 +519,7 @@
           ${extra ? `<div><div class="small muted">${r0.au != null && cols.au ? esc(cols.au) : 'Details'}</div><div class="fee">${r0.au != null && cols.au ? esc(r0.au) + (extraX ? ' · ' + extraX : '') : extraX}</div></div>` : ''}
           <div><div class="small muted">Effective</div><div class="eff">${esc(m.effectiveLabel)}</div></div>
         </div>
-        <div class="row"><button class="ghost" id="askCode">Ask SI/AI</button><button class="ghost" id="copyCode">Copy code</button>${logsHandoffBtn('fee', c.code, r0.d || c.desc)}</div>
+        <div class="row"><button class="ghost" id="askCode">Ask SI/AI</button><button class="ghost" id="copyCode">Copy code</button>${pickBtn('hsc', c.code)}</div>
         <h3>In the official document</h3><div class="links">${docLinks.join('') || '<span class="muted">—</span>'}</div>
         <p class="small">Notes, rules and modifiers for this code are on the linked page and in the ${esc(m.title)} rules (<a href="#/rules">Rules tab</a>).</p>
         <h3>${c.rows.length > 1 ? 'All listings (' + c.rows.length + ')' : 'Listing'}</h3>${rowsHtml}
@@ -458,8 +531,6 @@
       if (!quiet && !window.matchMedia('(min-width:900px)').matches) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
     if (location.hash !== '#/code/' + c.code) history.replaceState(null, '', '#/code/' + c.code);
-    bindLogsHandoff(el);
-    if (!quiet) sendToLogs('fee', c.code, r0.d || c.desc);
   }
   const noDxMsg = () => P && P.meta.dx && P.meta.dx.note ? P.meta.dx.note : 'No diagnostic code list is bundled for this jurisdiction.';
   function renderDxScope() {
@@ -641,7 +712,7 @@
     box.innerHTML = hits.map((h, i) => {
       const c = h.doc.c, f = feeFor(c);
       return `<button class="hit${current === c.code ? ' sel' : ''}" data-code="${esc(c.code)}">
-        <div class="row1"><span class="lft"><span class="code">${esc(c.display || c.code)}</span>${star(hk(c.code))}</span><span class="fee">${f.amount == null ? esc(f.label) : money(f.amount)}</span></div>
+        <div class="row1"><span class="lft"><span class="code">${esc(c.display || c.code)}</span>${star(hk(c.code))}</span><span class="fee">${f.amount == null ? esc(f.label) : money(f.amount)}</span>${pickDet()}</div>
         <div class="hdesc">${esc(c.desc)}</div>
         <div class="score">#${i + 1} · score ${h.score.toFixed(2)} (${Math.round(100 * h.score / top)}%) · ${esc(f.label)}${c.cat ? ' · cat ' + esc(c.cat) : ''}
         ${c.bulletins && c.bulletins.some(b => !b.superseded) ? ' · <span class="badge b">MED ' + c.bulletins[0].num + '</span>' : ''}</div></button>`;
@@ -665,7 +736,7 @@
   function savedRow(key) {   // one compact line: bold code, description truncated with an ellipsis, fee/badge, star
     const sk = splitKey(key), code = sk.code;
     if (heldJur(sk.jur)) return '';
-    const line = (attrs, cls, cd, desc, right, title) => `<button class="hit compact${cls}" ${attrs}${title ? ` title="${esc(title)}"` : ''}><span class="ccode code">${esc(cd)}</span><span class="cdesc">${esc(desc)}</span>${right}${star(key)}</button>`;
+    const line = (attrs, cls, cd, desc, right, title) => `<button class="hit compact${cls}" ${attrs}${title ? ` title="${esc(title)}"` : ''}><span class="ccode code">${esc(cd)}</span><span class="cdesc">${esc(desc)}</span>${right}${star(key)}${sk.t === 'H' && sk.jur === JUR ? pickDet() : ''}</button>`;
     if (sk.jur !== JUR) {
       const j = JREG.find(x => x.id === sk.jur), nm = j ? jn(j) : sk.jur;
       return line(`data-jur="${esc(sk.jur)}" data-${sk.t === 'H' ? 'code' : 'icd'}="${esc(code)}"`, ' other', code, `${sk.t === 'H' ? 'Fee code' : 'Diagnostic code'} saved under ${nm}. Tap to switch to ${nm}.`, `<span class="badge j">${esc(nm)}</span>`, 'Opens ' + nm);
@@ -751,7 +822,7 @@
         ${skill !== 'BASE' && f.amount !== c.base && !c.byAssess ? `<div><div class="small muted">Schedule base</div><div class="fee">${money(c.base)}</div></div>` : ''}
         ${c.ane != null ? `<div><div class="small muted">Anaesthetic benefit (separate)</div><div class="fee">${money(c.ane)}</div></div>` : ''}
       </div>
-      <div class="row"><button class="ghost" id="askCode">Ask SI/AI</button><button class="ghost" id="copyCode">Copy HSC</button>${logsHandoffBtn('fee', c.code, c.desc)}</div>
+      <div class="row"><button class="ghost" id="askCode">Ask SI/AI</button><button class="ghost" id="copyCode">Copy HSC</button>${pickBtn('hsc', c.code)}</div>
       ${call.length ? `<h3>For your description</h3><ul>${call.map(x => `<li>${x}</li>`).join('')}</ul>` : ''}
       ${c.notes ? `<h3>Notes</h3><p>${grLinks(c.notes)}</p>` : ''}
       ${c.gr && c.gr.length ? `<p class="small">Governing rules: ${c.gr.map(g => `<a href="#/rules/${g}">GR ${g}</a>`).join(', ')}</p>` : ''}
@@ -770,8 +841,6 @@
     { const sg = suggestIcd(c); $('#icdsugbasis').textContent = '(' + sg.basis + ')'; renderIcdList($('#icdsug'), sg.rows, sg.empty); }
     if (!quiet && !window.matchMedia('(min-width:900px)').matches) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     if (location.hash !== '#/code/' + code) history.replaceState(null, '', '#/code/' + code);
-    bindLogsHandoff(el);
-    if (!quiet) sendToLogs('fee', c.code, c.desc);
   }
 
   // Phone code card: fee, key notes collapsed, ICD-9 suggestions, Document / Ask AI / More about this condition.
@@ -783,7 +852,7 @@
       <h2>${esc(c.desc)}</h2>
       <div class="pfee"><div class="fee big">${f.amount == null ? esc(f.label) : money(f.amount)}</div>
         <div class="small muted">Schedule fee (${esc(skill === 'BASE' ? 'base' : skill)})${skill !== 'BASE' && f.amount !== c.base && !c.byAssess ? ' · base ' + money(c.base) : ''}${c.ane != null ? ' · anaesthetic ' + money(c.ane) + ' (separate)' : ''}</div></div>
-      <div class="pbtns"><button type="button" class="ghost" id="pDoc" aria-expanded="false">Document</button><button type="button" class="ghost" id="askCode">Ask SI/AI</button><button type="button" class="ghost" id="pMore">More about this condition</button>${logsHandoffBtn('fee', c.code, c.desc)}</div>
+      <div class="pbtns"><button type="button" class="ghost" id="pDoc" aria-expanded="false">Document</button><button type="button" class="ghost" id="askCode">Ask SI/AI</button><button type="button" class="ghost" id="pMore">More about this condition</button></div>${pickBtn('hsc', c.code)}
       <div id="pDocs" class="links" hidden>${docLinks.join('') || '<span class="muted">No document page listed.</span>'}</div>
       ${call.length ? `<details><summary>For your description</summary><ul>${call.map(x => `<li>${x}</li>`).join('')}</ul></details>` : ''}
       ${c.notes || (c.gr && c.gr.length) ? `<details><summary>Key notes</summary>${c.notes ? `<p>${grLinks(c.notes)}</p>` : ''}${c.gr && c.gr.length ? `<p class="small">Governing rules: ${c.gr.map(g => `<a href="#/rules/${g}">GR ${g}</a>`).join(', ')}</p>` : ''}</details>` : ''}
@@ -801,8 +870,6 @@
     $('.split').classList.add('showing');
     window.scrollTo(0, 0);
     if (location.hash !== '#/code/' + c.code) history.replaceState(null, '', '#/code/' + c.code);
-    bindLogsHandoff(el);
-    sendToLogs('fee', c.code, c.desc);
   }
 
   // ------------------------------------------------------------ ICD-9
@@ -1005,7 +1072,7 @@
     if (!rows.length) { el.innerHTML = '<p class="muted small">' + esc(emptyMsg || 'No ICD-9 suggestions in this scope.') + '</p>'; return; }
     el.innerHTML = rows.map(r => `<div class="icdrow" data-icd="${esc(r.i.code)}"><div><span class="code">${esc(r.i.code)}</span> ${esc(icdLabel(r.i))}
       <div class="small muted">${esc(r.i.block || '')}${r.score != null ? ' · score ' + r.score.toFixed(2) : (r.why ? ' · key match' : '')}</div>${r.why ? `<div class="small why">Why suggested: ${esc(r.why)}</div>` : ''}</div>
-      <div class="btns">${star(ik(r.i.code))}<button class="ghost" data-copy="${esc(r.i.code)}">Copy</button><button class="ghost" data-medres="${esc(r.i.code)}">More about this condition</button></div></div>`).join('');
+      <div class="btns">${PICK.get() ? `<button class="primary pickuse sm" data-pick="dx" data-code="${esc(r.i.code)}" aria-label="Use ${esc(r.i.code)} in MedBilling Logs">Use</button>` : ''}${star(ik(r.i.code))}<button class="ghost" data-copy="${esc(r.i.code)}">Copy</button><button class="ghost" data-medres="${esc(r.i.code)}">More about this condition</button></div></div>`).join('');
   }
   function icdSearch(q) {
     const el = $('#icdresults');
@@ -1063,7 +1130,7 @@
   }
   function renderResources() {
     const el = $('#resources');
-    el.innerHTML = `<div class="condhead"><h2>Resources</h2><p class="small muted">Clinical and guideline sources by region. Open “More about this condition” on any diagnostic code for condition-specific searches.</p></div>` + resourcesHtml(null) +
+    el.innerHTML = `<div class="condhead"><h2>Resources</h2><p class="small muted">Clinical and guideline sources by region. Open “More about this condition” on any diagnostic code for condition-specific searches.</p></div>` + resourcesHtml(null) + (JUR === 'AB' ? ahcipBullHtml() : '') +
       `<div class="card srccard"><h3>Source and credits: ${esc(JINFO ? jn(JINFO) : 'Alberta')}</h3>${sourceNoteHtml()}</div>` + aboutHtml();
     wireRegion(el, null);
   }
@@ -1096,10 +1163,8 @@
     const dxDesc = icdLabel(i);
     sec.innerHTML = `<div class="condhead"><div class="small muted">Medical resources</div><h2><span class="code">${esc(i.code)}</span>${star(ik(i.code))} ${esc(dxDesc)}</h2>
       <div class="small muted">${esc(i.block || '')}${i.excl ? ' · ' + esc(i.excl) : ''}</div>
-      <div class="row mt8"><button class="ghost" data-copy="${esc(i.code)}">Copy ${esc(dxName())}</button>${logsHandoffBtn('dx', i.code, dxDesc)}<button class="ghost" id="medBack">Back</button></div></div>` + topSourcesHtml(i) + resourcesHtml(i);
+      <div class="row mt8"><button class="ghost" data-copy="${esc(i.code)}">Copy ${esc(dxName())}</button>${pickBtn('dx', i.code)}<button class="ghost" id="medBack">Back</button></div></div>` + topSourcesHtml(i) + resourcesHtml(i);
     wireRegion(sec, i);
-    bindLogsHandoff(sec);
-    sendToLogs('dx', i.code, dxDesc);
     $('#medBack', sec).onclick = () => history.back();
     showTab('medres');
     window.scrollTo(0, 0);
@@ -1137,9 +1202,13 @@
     $('#explanatory').innerHTML = EXPL.filter(e => !f || e.code.toLowerCase().startsWith(f) || (e.title + ' ' + e.text).toLowerCase().includes(f))
       .map(e => `<div class="rule"><span class="code">${esc(e.code)}</span><b>${esc(e.title)}</b> <span class="small muted">${esc(e.group || '')}</span><br>${esc(e.text)}</div>`).join('');
   }
+  // Alberta Health Care Insurance Plan bulletin series (official open.alberta.ca pages; all checked 200 on 6 Oct 2026)
+  const AHCIP_BULL = [['ARP Bulletins', 'arp'], ['Chiropractic Bulletins', 'chiropractic-services'], ['Dental Bulletins', 'dental-services'], ['General Bulletins', 'general-information'],
+    ['Medical Bulletins', 'medical-services'], ['Optometric Bulletins', 'optometric-services'], ['Podiatric Surgery Bulletins', 'podiatric-surgery-services'], ['Podiatry Bulletins', 'podiatry-services']];
+  const ahcipBullHtml = () => `<div class="card ahcipbull"><h3>Alberta Health Care Insurance Plan bulletins</h3><ul class="bulllinks">${AHCIP_BULL.map(([n, s]) => `<li><a href="https://open.alberta.ca/publications/bulletin-alberta-health-care-insurance-plan-${s}" target="_blank" rel="noopener noreferrer">${esc(n)}</a></li>`).join('')}</ul><p class="small muted">Official pages on open.alberta.ca (opens outside the app).</p></div>`;
   function renderBulletins() {
     const list = BULL.slice().sort((a, b) => b.num - a.num);
-    $('#bulletins').innerHTML = `<p class="small muted">AHCIP medical bulletins (MED 251 onward) from <a target="_blank" rel="noopener noreferrer" href="${esc(META.bulletinsDataset)}">open.alberta.ca</a>. HSCs named in a bulletin are flagged on the code detail.</p>` +
+    $('#bulletins').innerHTML = ahcipBullHtml() + `<p class="small muted">AHCIP medical bulletins (MED 251 onward) from <a target="_blank" rel="noopener noreferrer" href="${esc(META.bulletinsDataset)}">open.alberta.ca</a>. HSCs named in a bulletin are flagged on the code detail.</p>` +
       list.map(b => `<div class="bul${b.superseded ? ' sup' : ''}"><b>MED ${b.num}</b> — ${esc(b.title)} <span class="small muted">${esc(b.date || b.created)}</span>
         ${b.superseded ? `<span class="badge s">superseded${b.supersededBy ? ' by MED ' + b.supersededBy : ''}</span>` : ''}
         ${b.supersedes && b.supersedes.length ? `<div class="small muted">Supersedes MED ${b.supersedes.join(', ')}</div>` : ''}
@@ -1322,6 +1391,22 @@
     });
     wireAI(); wireFeedback();
   }
+  // Pick mode taps (capture phase, before rows open their detail). Fee code: a search result, saved row, price-list code,
+  // the big code on its page or "Use … in MedBilling Logs". ICD-9: any ICD-9 row (search, suggested list, saved) or its page.
+  document.addEventListener('click', e => {
+    const p = PICK.get(); if (!p || !ready) return;
+    const t = e.target; if (!t.closest) return;
+    const stop = () => { e.preventDefault(); e.stopPropagation(); };
+    const b = t.closest('[data-pick]'); if (b) { stop(); sendPick(b.dataset.code, b.dataset.pick); return; }
+    if (t.closest('#pickbar, [data-fav], [data-copy], [data-medres], .pdet, a[target="_blank"], select, input, summary, #pBack, #pDoc, #askCode, #copyCode, #medBack, #pMore, dialog')) return;
+    const ir = t.closest('.icdrow'); if (ir && ir.dataset.icd) { stop(); sendPick(ir.dataset.icd, 'dx'); return; }
+    const h = t.closest('#results .hit');
+    if (h) { if (h.dataset.jur) return; if (h.dataset.icd) { stop(); sendPick(h.dataset.icd, 'dx'); } else if (h.dataset.code && p.kind === 'hsc') { stop(); sendPick(h.dataset.code, 'hsc'); } return; }
+    const a = t.closest('#pricelist a.code'); if (a && p.kind === 'hsc') { const m = (a.getAttribute('href') || '').match(/^#\/code\/(.+)$/); if (m && BYCODE[decodeURIComponent(m[1])]) { stop(); sendPick(decodeURIComponent(m[1]), 'hsc'); } return; }
+    if (t.closest('#detail .codebig') && current) { stop(); sendPick(current, 'hsc'); return; }
+    const mc = t.closest('#tab-medres .condhead h2 .code'); if (mc) { stop(); sendPick(mc.textContent, 'dx'); }
+  }, true);
+  document.addEventListener('keydown', e => { const d = e.target.closest && e.target.closest('.pdet'); if (d && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); const h = d.closest('.hit'); if (h && h.dataset.code) showCode(h.dataset.code); } });
   // Star toggles run in the capture phase so a tap never opens the row, card or link underneath.
   document.addEventListener('click', e => { const s = e.target.closest && e.target.closest('[data-fav]'); if (!s) return; e.preventDefault(); e.stopPropagation(); if (ready) toggleFav(s.dataset.fav); }, true);
   document.addEventListener('keydown', e => { const s = e.target.closest && e.target.closest('[data-fav]'); if (!s || (e.key !== 'Enter' && e.key !== ' ')) return; e.preventDefault(); e.stopPropagation(); if (ready) toggleFav(s.dataset.fav); }, true);
@@ -1341,5 +1426,6 @@
     }).catch(() => {});
   }
 
+  pickBar();
   boot().then(() => { ready = true; }).catch(err => { document.body.insertAdjacentHTML('afterbegin', '<p class="pad warn">Could not load data files. Serve this folder over http (e.g. python3 -m http.server).</p>'); console.error(err); });
 })();

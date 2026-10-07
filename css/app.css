@@ -204,3 +204,29 @@ html.jur-x .abonly,html.jur-soon .needdata,html.noskill .skill,html.noskill .ski
 .aboutcard{margin-top:12px}.aboutcard .aboutlinks{margin:6px 0;font-weight:600}
 .srcnote .notofficial,.srccard .notofficial{font-weight:600}
 .hit.heldsaved{display:flex;align-items:center;gap:10px;cursor:default;color:var(--muted,#64748b);font-size:.85rem}.hit.heldsaved .cdesc{white-space:normal}.hit.heldsaved .linkbtn{margin-left:auto;flex:0 0 auto}
+/* v33 pick mode for MedBilling Logs: slim bar at the bottom, tap a code to send it back */
+.pickbar{position:fixed;left:0;right:0;bottom:0;z-index:60;display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:2px 6px;background:#fef3c7;color:#713f12;border-top:1px solid #f59e0b;padding:6px 12px calc(6px + env(safe-area-inset-bottom));font-size:.9rem;line-height:1.3;box-shadow:0 -2px 8px rgba(15,23,42,.08)}
+.pickbar .pbtxt{font-weight:600;text-align:center}
+.pickbar .pbcancel{border:1px solid #b45309;background:#fff;color:#7c2d12;border-radius:999px;padding:0 14px;min-height:32px;font-weight:600;cursor:pointer}
+html.picking body{padding-bottom:calc(64px + env(safe-area-inset-bottom))}
+html.picking .toast{bottom:calc(64px + env(safe-area-inset-bottom))}
+html.picking #results .hit:not(.other):not(.heldsaved):hover,html.picking .icdrow:hover{outline:2px solid #f59e0b;outline-offset:-2px}
+html.picking .icdrow{cursor:pointer}
+.pdet{display:inline-flex;align-items:center;margin-left:8px;padding:0 10px;min-height:28px;border:1px solid var(--teal);border-radius:999px;color:var(--teal-d);background:#fff;font-size:.8rem;font-weight:600;cursor:pointer;flex:0 0 auto}
+.pickuse{margin:8px 0}
+.icdrow .pickuse.sm{margin:0;padding:5px 12px;font-size:.8rem;border-radius:8px}
+html.picking #detail .codebig{cursor:pointer;text-decoration:underline dotted 2px;text-underline-offset:4px}
+.ahcipbull{padding:10px 14px;margin:0 0 12px}.ahcipbull h3{margin:2px 0 6px;font-size:1rem}
+.bulllinks{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:2px 16px}
+.bulllinks a{display:flex;align-items:center;min-height:40px;font-weight:600}
+/* v33 pick mode on a phone: the banner is two tidy lines with Cancel on the right; ICD-9 rows let their buttons wrap
+   under the description instead of squeezing it (the extra "Use" button made rows too wide at 390px) */
+@media (max-width:600px){
+  .pickbar{flex-wrap:nowrap;justify-content:space-between;text-align:left;font-size:.85rem;gap:10px}
+  .pickbar .pbtxt{text-align:left;flex:1 1 auto}
+  .pickbar .pbsep{display:none}
+  .pickbar .pbcancel{flex:0 0 auto;min-height:40px}
+  html.picking .icdrow{flex-wrap:wrap;align-items:flex-start}
+  html.picking .icdrow>div:first-child{flex:1 1 100%;min-width:0}
+  html.picking .icdrow .btns{flex-wrap:wrap;flex-shrink:1}
+}
