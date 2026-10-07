@@ -125,7 +125,53 @@
   // Timestamps (ISO) for export: when each favourite was added and when each recent code was last opened.
   let TS = (() => { try { const o = JSON.parse(LS.get('savedts', '{}')); return { f: o.f || {}, r: o.r || {} }; } catch (e) { return { f: {}, r: {} }; } })();
   const saveTS = () => LS.set('savedts', JSON.stringify(TS));
-  const saveLists = () => { LS.set('favs', JSON.stringify(FAVS)); LS.set('recent', JSON.stringify(RECENT)); saveTS(); };
+  // ---- Favourite groups (v34): folders by specialty, doctor or a custom name. Stored on this device only under
+  // 'mb.favgroups'; 'mb.favs' stays the master list exactly as before, so older versions keep working and a favourite in
+  // no group is shown under "Ungrouped". A code can sit in several groups. Group names are the user's own labels.
+  const GKEY = 'favgroups', GID = /^g[a-z0-9]{1,24}$/;
+  const GTYPES = { specialty: 'Specialty', doctor: 'Doctor', custom: 'Custom' };
+  const SPECIALTIES = ['Family Medicine', 'Obstetrics & Gynecology', 'General Surgery', 'Internal Medicine', 'Pediatrics', 'Anesthesia',
+    'Emergency Medicine', 'Psychiatry', 'Orthopedics', 'Cardiology', 'Cardiac Surgery', 'Critical Care', 'Dermatology', 'Endocrinology',
+    'Gastroenterology', 'Geriatrics', 'Hematology', 'Infectious Diseases', 'Nephrology', 'Neurology', 'Neurosurgery', 'Oncology',
+    'Ophthalmology', 'Otolaryngology (ENT)', 'Palliative Care', 'Pathology', 'Physical Medicine & Rehabilitation', 'Plastic Surgery',
+    'Radiology', 'Respirology', 'Rheumatology', 'Sports Medicine', 'Thoracic Surgery', 'Urology', 'Vascular Surgery'];
+  const cleanName = v => String(v == null ? '' : v).replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
+  function readGroups() {
+    const g = { groups: [], sort: 'custom', collapsed: [], last: [] };
+    let o = null; try { o = JSON.parse(LS.get(GKEY, 'null')); } catch (e) { o = null; }
+    if (!o || typeof o !== 'object') return g;
+    const seen = new Set();
+    if (Array.isArray(o.groups)) o.groups.forEach(x => {
+      if (!x || typeof x.id !== 'string' || !GID.test(x.id) || seen.has(x.id) || !cleanName(x.name)) return; seen.add(x.id);
+      g.groups.push({ id: x.id, name: cleanName(x.name), type: GTYPES[x.type] ? x.type : 'custom',
+        keys: Array.isArray(x.keys) ? [...new Set(x.keys.filter(k => typeof k === 'string' && /^[HI]:/.test(k)))] : [] });
+    });
+    g.sort = o.sort === 'az' ? 'az' : 'custom';
+    const strs = a => Array.isArray(a) ? a.filter(x => typeof x === 'string') : [];
+    g.collapsed = strs(o.collapsed); g.last = strs(o.last);
+    return g;
+  }
+  let GS = readGroups();
+  function pruneGroups() {   // group members must be favourites; drop unknown ids from the UI state
+    const f = new Set(FAVS), ids = new Set(GS.groups.map(g => g.id));
+    GS.groups.forEach(g => { g.keys = g.keys.filter(k => f.has(k)); });
+    GS.collapsed = GS.collapsed.filter(id => id === 'ungrouped' || ids.has(id)); GS.last = GS.last.filter(id => ids.has(id));
+  }
+  pruneGroups();
+  const saveGroups = () => { pruneGroups(); LS.set(GKEY, JSON.stringify({ v: 1, groups: GS.groups, sort: GS.sort, collapsed: GS.collapsed, last: GS.last })); };
+  const groupById = id => GS.groups.find(g => g.id === id);
+  const groupsOf = key => GS.groups.filter(g => g.keys.includes(key));
+  const ungroupedKeys = () => { const inG = new Set(); GS.groups.forEach(g => g.keys.forEach(k => inG.add(k))); return FAVS.filter(k => !inG.has(k)); };
+  function addToGroup(id, key) { const g = groupById(id); if (g && !g.keys.includes(key)) g.keys.unshift(key); }
+  function removeFromGroup(id, key) { const g = groupById(id); if (g) g.keys = g.keys.filter(k => k !== key); }
+  const orderedGroups = () => GS.sort === 'az' ? GS.groups.slice().sort((a, b) => a.name.localeCompare(b.name, 'en-CA', { sensitivity: 'base', numeric: true }) || a.type.localeCompare(b.type)) : GS.groups.slice();
+  const findGroup = (type, name) => GS.groups.find(g => g.type === type && g.name.toLowerCase() === cleanName(name).toLowerCase());
+  function newGroup(type, name) {
+    let id; do { id = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); } while (groupById(id));
+    GS.groups.push({ id, name: cleanName(name), type: GTYPES[type] ? type : 'custom', keys: [] });
+    return id;
+  }
+  const saveLists = () => { LS.set('favs', JSON.stringify(FAVS)); LS.set('recent', JSON.stringify(RECENT)); saveTS(); if (GS.groups.length || LS.get(GKEY, null) != null) saveGroups(); };
   // Ask the browser not to evict local data (supported in Chrome, Edge, Firefox, Safari 15.2+). Silent if unsupported or refused.
   function persistStorage() { try { if (navigator.storage && navigator.storage.persist) navigator.storage.persisted().then(p => p || navigator.storage.persist()).catch(() => {}); } catch (e) {} }
   function star(key) {
@@ -139,11 +185,13 @@
   function toggleFav(key) {
     const on = !isFav(key);
     FAVS = on ? [key].concat(FAVS) : FAVS.filter(k => k !== key);
-    if (on) { TS.f[key] = new Date().toISOString(); persistStorage(); } else delete TS.f[key];
+    if (on) { TS.f[key] = new Date().toISOString(); persistStorage(); } else { delete TS.f[key]; GS.groups.forEach(g => { g.keys = g.keys.filter(k => k !== key); }); }
+    // v34: a new favourite goes into the group(s) used last (none = Ungrouped); the quick sheet lets you change that
+    if (on && GS.groups.length) GS.last.forEach(id => addToGroup(id, key));
     saveLists();
     $$('[data-fav]').forEach(el => { if (el.dataset.fav === key) paintStar(el); });
-    if (!lastQuery && $('#results .savedh')) renderSaved();
-    toast(on ? 'Added to favourites' : 'Removed from favourites');
+    refreshSaved();
+    if (on && GS.groups.length) codeSheet(key, { fresh: true }); else toast(on ? 'Added to favourites' : 'Removed from favourites');
   }
   function addRecent(key) {
     RECENT = [key].concat(RECENT.filter(k => k !== key)).slice(0, RECENT_MAX);
@@ -154,8 +202,11 @@
   const keyToItem = (k, t) => { const s = splitKey(k); return { type: s.t === 'H' ? 'HSC' : 'ICD9', code: s.code, jur: s.jur, ...(t ? { at: t } : {}) }; };
   function exportSaved() {
     const now = new Date();
-    const data = { app: 'MedBilling Fee Desk', kind: 'favourites', version: 2, exported: now.toISOString(),
-      favourites: FAVS.map(k => keyToItem(k, TS.f[k])), recent: RECENT.map(k => keyToItem(k, TS.r[k])) };
+    // version 3 adds "groups" (name, type and member codes; custom order) and "groupSort". Older versions read only
+    // "favourites" and "recent", so a new file still imports there: every code arrives, just without its groups.
+    const data = { app: 'MedBilling Fee Desk', kind: 'favourites', version: 3, exported: now.toISOString(),
+      favourites: FAVS.map(k => keyToItem(k, TS.f[k])), recent: RECENT.map(k => keyToItem(k, TS.r[k])),
+      groups: GS.groups.map(g => ({ name: g.name, type: g.type, codes: g.keys.map(k => keyToItem(k)) })), groupSort: GS.sort };
     const d = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     const name = `medbilling-fee-desk-favourites-${d}.json`, text = JSON.stringify(data, null, 1);
     const blob = new Blob([text], { type: 'application/json' });
@@ -179,7 +230,11 @@
       const at = typeof x.at === 'string' && !isNaN(Date.parse(x.at)) ? new Date(x.at).toISOString() : null;
       return { key: t + ':' + (jur === 'AB' ? '' : jur + '|') + code, at };
     }).filter(Boolean);
-    return { fav: conv(o.favourites), rec: conv(o.recent), skipped: ((o.favourites || []).length + (o.recent || []).length) };
+    // groups (version 3+): an old file has none, so its codes simply land in Ungrouped
+    const groups = (Array.isArray(o.groups) ? o.groups : []).map(g => g && typeof g === 'object' && cleanName(g.name)
+      ? { name: cleanName(g.name), type: GTYPES[g.type] ? g.type : 'custom', keys: [...new Set(conv(g.codes).map(x => x.key))] } : null).filter(Boolean).slice(0, 500);
+    return { fav: conv(o.favourites), rec: conv(o.recent), groups, groupSort: o.groupSort === 'az' ? 'az' : o.groupSort === 'custom' ? 'custom' : null,
+      skipped: ((o.favourites || []).length + (o.recent || []).length) };
   }
   function importSaved(file) {
     const r = new FileReader();
@@ -187,17 +242,30 @@
       let p; try { p = parseImport(String(r.result)); } catch (e) { alert('Import failed: this is not a MedBilling Fee Desk favourites file.'); return; }
       const newFav = [...new Set(p.fav.map(x => x.key))].filter(k => !FAVS.includes(k));
       const skipped = p.skipped - p.fav.length - p.rec.length;
-      if (!newFav.length && !p.rec.length) { alert('Nothing to import: all favourites in this file are already saved' + (skipped ? ` (${skipped} unknown code${skipped > 1 ? 's' : ''} skipped)` : '') + '.'); return; }
-      if (!confirm(`Import from ${file.name}?\n\n• ${newFav.length} new favourite${newFav.length === 1 ? '' : 's'} (${p.fav.length - newFav.length} already saved)\n• ${p.rec.length} recent code${p.rec.length === 1 ? '' : 's'} merged, newest kept, max ${RECENT_MAX}` + (skipped ? `\n• ${skipped} unknown code${skipped > 1 ? 's' : ''} skipped` : '') + '\n\nExisting favourites are kept; nothing is deleted.')) return;
+      // groups: merged by type + name (case-insensitive); only codes that are favourites after the import are placed
+      const willFav = new Set(FAVS.concat(newFav));
+      let gNew = 0, gPlace = 0; const gSeen = new Set();
+      p.groups.forEach(g => { const ex = findGroup(g.type, g.name), id = g.type + '|' + g.name.toLowerCase();
+        if (!ex && !gSeen.has(id)) gNew++; gSeen.add(id);
+        g.keys.forEach(k => { if (willFav.has(k) && !(ex && ex.keys.includes(k))) gPlace++; }); });
+      const gLine = p.groups.length ? `\n• ${p.groups.length} group${p.groups.length === 1 ? '' : 's'} (${gNew} new), ${gPlace} code${gPlace === 1 ? '' : 's'} placed in groups`
+        : (GS.groups.length && newFav.length ? '\n• No groups in this file: new favourites go to Ungrouped' : '');
+      if (!newFav.length && !p.rec.length && !gNew && !gPlace) { alert('Nothing to import: all favourites in this file are already saved' + (skipped ? ` (${skipped} unknown code${skipped > 1 ? 's' : ''} skipped)` : '') + '.'); return; }
+      if (!confirm(`Import from ${file.name}?\n\n• ${newFav.length} new favourite${newFav.length === 1 ? '' : 's'} (${p.fav.length - newFav.length} already saved)\n• ${p.rec.length} recent code${p.rec.length === 1 ? '' : 's'} merged, newest kept, max ${RECENT_MAX}` + gLine + (skipped ? `\n• ${skipped} unknown code${skipped > 1 ? 's' : ''} skipped` : '') + '\n\nExisting favourites and groups are kept; nothing is deleted.')) return;
       const now = new Date().toISOString();
       p.fav.forEach(x => { if (newFav.includes(x.key) && !TS.f[x.key]) TS.f[x.key] = x.at || now; });
       FAVS = FAVS.concat(newFav);
+      const hadGroups = GS.groups.length > 0;
+      p.groups.forEach(g => { const id = (findGroup(g.type, g.name) || {}).id || newGroup(g.type, g.name), grp = groupById(id);
+        g.keys.slice().reverse().forEach(k => { if (willFav.has(k) && !grp.keys.includes(k)) grp.keys.unshift(k); }); });
+      if (!hadGroups && p.groupSort) GS.sort = p.groupSort;
+      if (p.groups.length) saveGroups();
       const rmap = {}; RECENT.forEach(k => rmap[k] = TS.r[k] || ''); p.rec.forEach(x => { const t = x.at || ''; if (!(x.key in rmap) || t > rmap[x.key]) rmap[x.key] = t; });
       const order = Object.keys(rmap).map((k, i) => ({ k, t: rmap[k], i })).sort((a, b) => (b.t > a.t) - (b.t < a.t) || a.i - b.i);
       RECENT = order.slice(0, RECENT_MAX).map(x => x.k); TS.r = {}; order.slice(0, RECENT_MAX).forEach(x => { if (x.t) TS.r[x.k] = x.t; });
       saveLists(); persistStorage();
-      if (!lastQuery && $('#results .savedh')) renderSaved();
-      toast(`Imported ${newFav.length} favourite${newFav.length === 1 ? '' : 's'} and ${p.rec.length} recent`);
+      refreshSaved();
+      toast(`Imported ${newFav.length} favourite${newFav.length === 1 ? '' : 's'}${p.groups.length ? `, ${p.groups.length} group${p.groups.length === 1 ? '' : 's'}` : ''} and ${p.rec.length} recent`);
     };
     r.onerror = () => alert('Import failed: the file could not be read.');
     r.readAsText(file);
@@ -733,10 +801,11 @@
     return Object.keys(by).map(id => { const j = JREG.find(x => x.id === id), n = by[id];
       return `<div class="hit compact heldsaved"><span class="cdesc">${esc(j ? jn(j) : id)}: ${n} saved code${n > 1 ? 's' : ''} hidden until permission is granted.</span><button type="button" class="linkbtn" data-dropheld="${esc(id)}">Remove</button></div>`; }).join('');
   }
-  function savedRow(key) {   // one compact line: bold code, description truncated with an ellipsis, fee/badge, star
+  function savedRow(key, gid) {   // one compact line: bold code, description truncated with an ellipsis, fee/badge, star (+ ⋯ in a group)
     const sk = splitKey(key), code = sk.code;
     if (heldJur(sk.jur)) return '';
-    const line = (attrs, cls, cd, desc, right, title) => `<button class="hit compact${cls}" ${attrs}${title ? ` title="${esc(title)}"` : ''}><span class="ccode code">${esc(cd)}</span><span class="cdesc">${esc(desc)}</span>${right}${star(key)}${sk.t === 'H' && sk.jur === JUR ? pickDet() : ''}</button>`;
+    const menu = gid ? `<span class="rowmenu" role="button" tabindex="0" data-favmenu="${esc(key)}" data-g="${esc(gid)}" aria-label="Groups and options for ${esc(code)}" title="Groups and options">⋯</span>` : '';
+    const line = (attrs, cls, cd, desc, right, title) => `<button class="hit compact${cls}" ${attrs} data-fk="${esc(key)}"${title ? ` title="${esc(title)}"` : ''}><span class="ccode code">${esc(cd)}</span><span class="cdesc">${esc(desc)}</span>${right}${star(key)}${sk.t === 'H' && sk.jur === JUR ? pickDet() : ''}${menu}</button>`;
     if (sk.jur !== JUR) {
       const j = JREG.find(x => x.id === sk.jur), nm = j ? jn(j) : sk.jur;
       return line(`data-jur="${esc(sk.jur)}" data-${sk.t === 'H' ? 'code' : 'icd'}="${esc(code)}"`, ' other', code, `${sk.t === 'H' ? 'Fee code' : 'Diagnostic code'} saved under ${nm}. Tap to switch to ${nm}.`, `<span class="badge j">${esc(nm)}</span>`, 'Opens ' + nm);
@@ -749,11 +818,51 @@
     const i = ICDBY[code]; if (!i) return '';
     return line(`data-icd="${esc(i.code)}"`, '', i.code, icdLabel(i), '<span class="small muted">ICD-9</span>', icdLabel(i));
   }
+  // text a favourite is matched on by the Favourites filter: code + description (current jurisdiction) + group names
+  function favText(key) {
+    const sk = splitKey(key); let t = sk.code;
+    if (sk.jur === JUR) { if (sk.t === 'H' && BYCODE[sk.code]) t += ' ' + BYCODE[sk.code].desc; else if (sk.t === 'I' && ICDBY[sk.code]) t += ' ' + icdLabel(ICDBY[sk.code]); }
+    else { const j = JREG.find(x => x.id === sk.jur); if (j) t += ' ' + j.name; }
+    return t.toLowerCase();
+  }
+  let favFilter = '';
+  const ICONS = {
+    specialty: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 1.5h4v4.5h4.5v4H10v4.5H6V10H1.5V6H6z"/></svg>',
+    doctor: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="4.6" r="3.1"/><path d="M1.8 15c.3-3.6 2.9-5.6 6.2-5.6s5.9 2 6.2 5.6z"/></svg>',
+    custom: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3h4.8l1.6 1.8h6.6V14h-13z"/></svg>',
+    ungrouped: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3h4.8l1.6 1.8h6.6V14h-13zM3 6.3V12.5h10V6.3z" fill-rule="evenodd"/></svg>' };
+  const typeTag = t => `<span class="fgtype t-${t}">${ICONS[t]}<span>${GTYPES[t]}</span></span>`;
+  function groupsHtml() {
+    const q = favFilter.trim().toLowerCase();
+    const secs = orderedGroups().map(g => ({ id: g.id, name: g.name, type: g.type, keys: g.keys }));
+    const ug = ungroupedKeys(); if (ug.length) secs.push({ id: 'ungrouped', name: 'Ungrouped', type: null, keys: ug });
+    let shown = 0;
+    const html = secs.map(g => {
+      const nameHit = q && g.type && g.name.toLowerCase().includes(q);
+      const keys = !q || nameHit ? g.keys : g.keys.filter(k => favText(k).includes(q));
+      if (q && !keys.length) return '';
+      shown++;
+      const open = q ? true : !GS.collapsed.includes(g.id);
+      const rowList = keys.map(k => savedRow(k, g.id)).filter(Boolean), held = keys.filter(k => heldJur(splitKey(k).jur)).length;
+      const n = rowList.length + held, total = q ? g.keys.filter(k => heldJur(splitKey(k).jur) || savedRow(k)).length : n;
+      const rows = rowList.join('') + heldSavedRows(keys);
+      const empty = g.type ? `<p class="muted small fgempty">No codes yet. Tap ☆ on any code, or <button type="button" class="linkbtn" data-fgadd="${esc(g.id)}">add favourites</button>.</p>` : '';
+      return `<section class="favgrp${g.type ? '' : ' ungrouped'}" data-gid="${esc(g.id)}"><div class="fgh">
+        <button type="button" class="fgtoggle" data-fgtoggle="${esc(g.id)}" aria-expanded="${open}" aria-controls="fgb-${esc(g.id)}"><span class="fgchev" aria-hidden="true">${open ? '▾' : '▸'}</span><span class="fgic">${ICONS[g.type || 'ungrouped']}</span><span class="fgname">${esc(g.name)}</span>${g.type ? typeTag(g.type) : ''}<span class="fgcount" aria-label="${n} code${n === 1 ? '' : 's'}">${q && n !== total ? n + '/' + total : n}</span></button>
+        ${g.type ? `<button type="button" class="fgmenu" data-fgmenu="${esc(g.id)}" aria-label="Options for group ${esc(g.name)}" title="Rename, reorder or delete">⋯</button>` : ''}</div>
+        <div class="fgbody" id="fgb-${esc(g.id)}"${open ? '' : ' hidden'}>${rows || empty}</div></section>`;
+    }).join('');
+    return shown ? html : `<p class="muted small pad savedempty">No favourites match “${esc(favFilter.trim())}”.</p>`;
+  }
   function renderSaved() {
     const box = $('#results'); box._ctx = null;
-    const fav = FAVS.map(savedRow).filter(Boolean).join('') + heldSavedRows(FAVS), rec = RECENT.map(savedRow).filter(Boolean).join('') + heldSavedRows(RECENT);
+    const grouped = GS.groups.length > 0;
+    const fav = grouped ? '' : FAVS.map(k => savedRow(k)).filter(Boolean).join('') + heldSavedRows(FAVS), rec = RECENT.map(k => savedRow(k)).filter(Boolean).join('') + heldSavedRows(RECENT);
     const sk = esc(skill === 'BASE' ? 'base' : skill);
-    box.innerHTML = (JINFO && JINFO.status !== 'live' ? soonPanel() : '') + `<div class="savedh" id="savedFav"><h3>★ Favourites</h3></div>${fav || '<p class="muted small pad savedempty">Tap ☆ on any code to keep it here.</p>'}
+    const tools = (FAVS.length >= 2 || grouped) ? `<div class="favtools"><div class="inputwrap fgq"><input id="favq" type="search" enterkeyhint="search" autocapitalize="off" spellcheck="false" placeholder="Filter favourites" aria-label="Filter favourites" value="${esc(favFilter)}"></div>${GS.groups.length >= 2 ? `<label class="fgsort"><span>Groups</span><select id="favSort" aria-label="Order of groups"><option value="custom"${GS.sort === 'custom' ? ' selected' : ''}>Custom order</option><option value="az"${GS.sort === 'az' ? ' selected' : ''}>A–Z</option></select></label>` : ''}</div>` : '';
+    const favBody = grouped ? `<div id="favgroups" class="favgroups">${groupsHtml()}</div>` : (fav || '<p class="muted small pad savedempty">Tap ☆ on any code to keep it here.</p>');
+    const hint = !grouped && FAVS.length >= 3 ? '<p class="muted small fghint">Long list? Group favourites by specialty, doctor or your own name with <b>+ New group</b>.</p>' : '';
+    box.innerHTML = (JINFO && JINFO.status !== 'live' ? soonPanel() : '') + `<div class="savedh" id="savedFav"><h3>★ Favourites</h3><button type="button" class="fgnew" id="favNewGrp" aria-label="New favourites group">+ New group</button></div>${tools}${hint}${favBody}
       <div class="savedh" id="savedRecent"><h3>Recent</h3>${rec ? '<button type="button" class="linkbtn" id="clearRecent">Clear</button>' : ''}</div>${rec || '<p class="muted small pad savedempty">Codes you open appear here (last ' + RECENT_MAX + ').</p>'}
       <div class="savedtools">
         <div class="saverow"><button type="button" class="ghost" id="expSaved" title="Save favourites &amp; recent codes to a file" aria-label="Save favourites &amp; recent codes to a file" aria-describedby="expHelp">Export</button><p class="small savedhelp" id="expHelp">Export saves your favourites and recent codes to a file so you can back them up or move them to another device.</p></div>
@@ -761,6 +870,169 @@
       </div>
       <p class="small muted pad savednote">Saved on this device only. Add to Home Screen on iPhone to keep them safe.</p>
       <p class="muted small pad savedfoot">${P ? (P.meta.skills.length ? `Fees shown for ${esc(P.meta.skillLabel.toLowerCase())} ${esc(skillName())}. ` : '') + `Codes from other provinces or territories are marked; tap one to switch.` : JUR === 'AB' ? `Fees shown for fee skill ${sk}.` : ''} Search runs on this device only; nothing you type is sent anywhere.</p>`;
+    if (!grouped && favFilter) applyFlatFilter();
+  }
+  const refreshSaved = () => { if (!lastQuery && $('#results .savedh')) renderSaved(); };
+  function applyFlatFilter() {   // no groups yet: the rows stay one list; non-matching ones are hidden
+    const q = favFilter.trim().toLowerCase(); let n = 0;
+    const fav = []; let el = $('#savedFav'); while ((el = el && el.nextElementSibling) && el.id !== 'savedRecent') if (el.matches('.hit[data-fk]')) fav.push(el);
+    fav.forEach(r => { const m = !q || favText(r.dataset.fk).includes(q); r.hidden = !m; if (m) n++; });
+    let msg = $('#favnomatch'); if (!n && q && fav.length) { if (!msg) { msg = document.createElement('p'); msg.id = 'favnomatch'; msg.className = 'muted small pad savedempty'; $('#savedRecent').before(msg); } msg.textContent = `No favourites match “${favFilter.trim()}”.`; } else if (msg) msg.remove();
+  }
+  function onFavFilter(v) {
+    favFilter = v;
+    if (GS.groups.length) { const g = $('#favgroups'); if (g) g.innerHTML = groupsHtml(); } else applyFlatFilter();
+  }
+  function toggleGroup(id) {
+    const open = GS.collapsed.includes(id);   // was collapsed -> open it
+    GS.collapsed = open ? GS.collapsed.filter(x => x !== id) : GS.collapsed.concat(id); saveGroups();
+    const sec = $(`#results .favgrp[data-gid="${id}"]`); if (!sec || favFilter.trim()) return;
+    const b = $('.fgtoggle', sec); b.setAttribute('aria-expanded', String(open)); $('.fgchev', b).textContent = open ? '▾' : '▸'; $('.fgbody', sec).hidden = !open;
+  }
+
+  // ---- Sheets (small dialogs: bottom sheet on a phone, centred card on wider screens)
+  let sheetEl = null, sheetPrevFocus = null;
+  document.addEventListener('keydown', e => { if (sheetEl && e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeSheet(); } }, true);
+  function closeSheet() {
+    if (!sheetEl) return; const s = sheetEl; sheetEl = null; s.remove(); document.documentElement.classList.remove('sheet-open');
+    if (sheetPrevFocus && document.contains(sheetPrevFocus)) { try { sheetPrevFocus.focus({ preventScroll: true }); } catch (e) {} }
+  }
+  function openSheet(id, title, body, wireFn) {
+    const keep = sheetEl ? sheetPrevFocus : document.activeElement; closeSheet(); sheetPrevFocus = keep;
+    const back = document.createElement('div'); back.className = 'fgback'; back.id = id;
+    back.innerHTML = `<div class="fgsheet" role="dialog" aria-modal="true" aria-labelledby="${id}-t"><div class="fgsh"><h3 id="${id}-t">${title}</h3><button type="button" class="fgx" data-close aria-label="Close">×</button></div><div class="fgsb">${body}</div></div>`;
+    document.body.appendChild(back); sheetEl = back; document.documentElement.classList.add('sheet-open');
+    back.addEventListener('click', e => { if (e.target === back || e.target.closest('[data-close]')) closeSheet(); });
+    back.addEventListener('keydown', e => {
+      if (e.key !== 'Tab') return;
+      const f = $$('button:not([disabled]),input:not([disabled]),select,[tabindex="0"]', back).filter(x => x.offsetParent !== null); if (!f.length) return;
+      if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f[f.length - 1].focus(); } else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
+    });
+    if (wireFn) wireFn(back);
+    const first = $('[autofocus]', back) || $('.fgsb button, .fgsb input', back) || $('.fgx', back);
+    setTimeout(() => { try { first.focus({ preventScroll: true }); } catch (e) {} }, 30);
+    return back;
+  }
+  function codeLabel(key) {
+    const sk = splitKey(key); let d = '';
+    if (sk.jur === JUR) d = sk.t === 'H' ? (BYCODE[sk.code] || {}).desc || '' : ICDBY[sk.code] ? icdLabel(ICDBY[sk.code]) : '';
+    else { const j = JREG.find(x => x.id === sk.jur); d = (sk.t === 'H' ? 'Fee code' : 'Diagnostic code') + ' saved under ' + (j ? jn(j) : sk.jur); }
+    return `<p class="fgcode"><span class="code">${esc(sk.code)}</span> <span class="muted">${esc(d)}</span></p>`;
+  }
+  const groupOpt = (g, checked) => `<label class="fgopt"><input type="checkbox" data-gid="${esc(g.id)}"${checked ? ' checked' : ''}><span class="fgic">${ICONS[g.type]}</span><span class="fgname">${esc(g.name)}</span>${typeTag(g.type)}<span class="fgcount">${g.keys.length}</span></label>`;
+  // Groups for one code: tick any number of groups (copy), untick to remove, "Move from <group> to" (move), or remove the star.
+  // fresh: just starred; ticking here also becomes the default for the next star ("last used").
+  function codeSheet(key, o) {
+    o = o || {}; const from = o.from && o.from !== 'ungrouped' ? groupById(o.from) : null;
+    const code = splitKey(key).code;
+    const body = () => {
+      const gs = orderedGroups(), mine = new Set(groupsOf(key).map(g => g.id));
+      return codeLabel(key) +
+        `<p class="small muted fgnote">${o.fresh ? 'Choose the group(s) for this code. A code can be in several groups; none ticked = Ungrouped.' : 'Tick the groups this code belongs to. A code can be in several groups; none ticked = Ungrouped.'}</p>
+        <div class="fgopts" role="group" aria-label="Groups">${gs.map(g => groupOpt(g, mine.has(g.id))).join('')}</div>
+        ${from && gs.length > 1 ? `<p class="fgsub">Move from ${esc(from.name)} to</p><div class="fgmove">${gs.filter(g => g.id !== from.id).map(g => `<button type="button" class="chip" data-moveto="${esc(g.id)}">${esc(g.name)}</button>`).join('')}</div>` : ''}
+        <div class="fgacts"><button type="button" class="ghost" data-newgrp>+ New group</button>${from ? `<button type="button" class="ghost" data-rmfrom>Remove from ${esc(from.name)}</button>` : ''}${o.fresh ? '' : '<button type="button" class="ghost danger" data-unfav>Remove from favourites</button>'}<button type="button" class="primary" data-close>Done</button></div>`;
+    };
+    const changed = () => { if (o.fresh) GS.last = groupsOf(key).map(g => g.id); saveGroups(); refreshSaved(); };
+    const wireIt = el => {
+      el.addEventListener('change', e => { const c = e.target.closest('input[data-gid]'); if (!c) return; if (c.checked) addToGroup(c.dataset.gid, key); else removeFromGroup(c.dataset.gid, key); changed(); $$('.fgopt', el).forEach(l => { const g = groupById($('input', l).dataset.gid); $('.fgcount', l).textContent = g ? g.keys.length : 0; }); });
+      el.addEventListener('click', e => {
+        const mv = e.target.closest('[data-moveto]');
+        if (mv) { const to = groupById(mv.dataset.moveto); removeFromGroup(from.id, key); addToGroup(to.id, key); changed(); closeSheet(); toast(`${code} moved to ${to.name}`); return; }
+        if (e.target.closest('[data-rmfrom]')) { removeFromGroup(from.id, key); changed(); closeSheet(); toast(`${code} removed from ${from.name}` + (groupsOf(key).length ? '' : ' (now Ungrouped)')); return; }
+        if (e.target.closest('[data-unfav]')) { closeSheet(); if (isFav(key)) toggleFav(key); return; }
+        if (e.target.closest('[data-newgrp]')) groupEditor(null, id => { addToGroup(id, key); changed(); codeSheet(key, o); });
+      });
+    };
+    openSheet('fgCodeSheet', o.fresh ? '★ Added to favourites' : 'Groups for ' + esc(code), body(), wireIt);
+  }
+  // Create or edit a group: type (Specialty / Doctor / Custom) and name
+  function groupEditor(gid, then) {
+    const g = gid ? groupById(gid) : null; let type = g ? g.type : 'specialty';
+    const ph = { specialty: 'Specialty, e.g. Family Medicine', doctor: "Doctor's name, e.g. Dr. A. Patel", custom: 'Any name, e.g. Tuesday clinic' };
+    const help = { specialty: 'Pick one below or type your own.', doctor: 'Your own label for a doctor you bill for. Kept on this device only.', custom: 'Any name that helps you find these codes.' };
+    const body = `<div class="fgseg" role="radiogroup" aria-label="Group type">${Object.keys(GTYPES).map(t => `<button type="button" role="radio" class="fgsegb t-${t}" data-type="${t}" aria-checked="${t === type}">${ICONS[t]}<span>${GTYPES[t]}</span></button>`).join('')}</div>
+      <label class="fglab" for="fgName">Name</label><input id="fgName" class="fginput" type="text" maxlength="60" autocomplete="off" autocapitalize="words" spellcheck="false" list="fgSpecList" value="${g ? esc(g.name) : ''}">
+      <datalist id="fgSpecList">${SPECIALTIES.map(x => `<option value="${esc(x)}">`).join('')}</datalist>
+      <p class="small muted fghelp" id="fgHelp"></p>
+      <div class="fgspecs" id="fgSpecs" role="group" aria-label="Common specialties">${SPECIALTIES.map(x => `<button type="button" class="chip" data-spec="${esc(x)}">${esc(x)}</button>`).join('')}</div>
+      <p class="fgerr" id="fgErr" role="alert" hidden></p>
+      <div class="fgacts"><button type="button" class="ghost" data-close>Cancel</button><button type="button" class="primary" id="fgSave">${g ? 'Save' : 'Create group'}</button></div>`;
+    openSheet('fgEditor', g ? 'Edit group' : 'New favourites group', body, el => {
+      const inp = $('#fgName', el), err = $('#fgErr', el);
+      const paint = () => { $$('.fgsegb', el).forEach(b => b.setAttribute('aria-checked', String(b.dataset.type === type))); inp.placeholder = ph[type]; $('#fgHelp', el).textContent = help[type];
+        $('#fgSpecs', el).hidden = type !== 'specialty'; if (type === 'specialty') inp.setAttribute('list', 'fgSpecList'); else inp.removeAttribute('list');
+        inp.setAttribute('aria-describedby', 'fgHelp'); err.hidden = true; };
+      paint();
+      el.addEventListener('click', e => {
+        const t = e.target.closest('[data-type]'); if (t) { type = t.dataset.type; paint(); inp.focus(); return; }
+        const sp = e.target.closest('[data-spec]'); if (sp) { inp.value = sp.dataset.spec; err.hidden = true; return; }
+        if (e.target.closest('#fgSave')) save();
+      });
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); save(); } });
+      function save() {
+        const name = cleanName(inp.value);
+        if (!name) { err.textContent = 'Type a name for the group.'; err.hidden = false; inp.focus(); return; }
+        const dup = findGroup(type, name); if (dup && dup.id !== gid) { err.textContent = `You already have the ${GTYPES[type].toLowerCase()} group “${dup.name}”.`; err.hidden = false; inp.focus(); return; }
+        let id = gid; if (g) { g.name = name; g.type = type; } else id = newGroup(type, name);
+        saveGroups(); refreshSaved(); closeSheet(); toast(g ? 'Group saved' : `Group “${name}” created`);
+        if (then) then(id);
+      }
+    });
+    if (!g) setTimeout(() => { try { $('#fgName').focus(); } catch (e) {} }, 60);
+  }
+  // Group options: add favourites, rename/change type, move up/down (custom order), delete
+  function groupSheet(gid) {
+    const g = groupById(gid); if (!g) return;
+    const ord = orderedGroups(), i = ord.indexOf(g);
+    const body = `<p class="fgcode">${typeTag(g.type)} <span class="muted">${g.keys.length} code${g.keys.length === 1 ? '' : 's'}</span></p>
+      <div class="fglist">
+        <button type="button" class="fgitem" data-act="add">Add favourites to this group…</button>
+        <button type="button" class="fgitem" data-act="edit">Rename or change type…</button>
+        <button type="button" class="fgitem" data-act="up"${i <= 0 ? ' disabled' : ''}>Move up</button>
+        <button type="button" class="fgitem" data-act="down"${i >= ord.length - 1 ? ' disabled' : ''}>Move down</button>
+        <button type="button" class="fgitem danger" data-act="del">Delete group…</button>
+      </div>${GS.sort === 'az' && ord.length > 1 ? '<p class="small muted fgnote">Groups are sorted A–Z. Moving a group switches to Custom order.</p>' : ''}`;
+    openSheet('fgGroupSheet', esc(g.name), body, el => el.addEventListener('click', e => {
+      const b = e.target.closest('[data-act]'); if (!b || b.disabled) return; const a = b.dataset.act;
+      if (a === 'add') return groupPicker(gid);
+      if (a === 'edit') return groupEditor(gid);
+      if (a === 'del') return deleteSheet(gid);
+      const cur = orderedGroups(), at = cur.indexOf(g), to = a === 'up' ? at - 1 : at + 1; if (to < 0 || to >= cur.length) return;
+      cur.splice(at, 1); cur.splice(to, 0, g); GS.groups = cur; GS.sort = 'custom'; saveGroups(); refreshSaved(); groupSheet(gid);
+      const s = $(`#results .favgrp[data-gid="${gid}"]`); if (s) s.scrollIntoView({ block: 'nearest' });
+    }));
+  }
+  function deleteSheet(gid) {
+    const g = groupById(gid); if (!g) return; const n = g.keys.length;
+    const only = g.keys.filter(k => groupsOf(k).length === 1).length;
+    const body = `<p>Delete the group <b>${esc(g.name)}</b>?${n ? ` It has ${n} code${n === 1 ? '' : 's'}.` : ''}</p>
+      <div class="fglist">${n ? `<button type="button" class="fgitem" data-del="keep">Delete group, keep its codes<span class="small muted">Codes stay in your favourites${only ? ` (${only} move to Ungrouped)` : ''}.</span></button>
+        <button type="button" class="fgitem danger" data-del="remove">Delete group and its codes<span class="small muted">Removes them from your favourites. Codes that are also in another group stay there.</span></button>`
+        : '<button type="button" class="fgitem danger" data-del="keep">Delete group</button>'}
+        <button type="button" class="fgitem" data-close>Cancel</button></div>`;
+    openSheet('fgDelSheet', 'Delete group', body, el => el.addEventListener('click', e => {
+      const b = e.target.closest('[data-del]'); if (!b) return;
+      let removed = 0;
+      if (b.dataset.del === 'remove') { const drop = g.keys.filter(k => groupsOf(k).length === 1); removed = drop.length; FAVS = FAVS.filter(k => !drop.includes(k)); drop.forEach(k => { delete TS.f[k]; }); }
+      GS.groups = GS.groups.filter(x => x.id !== gid); saveLists(); saveGroups();
+      $$('[data-fav]').forEach(paintStar); refreshSaved(); closeSheet();
+      toast(`Group “${g.name}” deleted` + (removed ? `, ${removed} code${removed === 1 ? '' : 's'} removed` : ''));
+    }));
+  }
+  // Tick favourites to put them in a group (handy for sorting an existing list)
+  function groupPicker(gid) {
+    const g = groupById(gid); if (!g) return;
+    const keys = FAVS.filter(k => !heldJur(splitKey(k).jur));
+    const row = k => { const t = codeLabel(k).replace(/<\/?p[^>]*>/g, '');
+      return `<label class="fgopt fgpick" data-t="${esc(favText(k))}"><input type="checkbox" data-key="${esc(k)}"${g.keys.includes(k) ? ' checked' : ''}><span class="fgpl">${t}</span></label>`; };
+    const body = keys.length ? `<div class="inputwrap fgq"><input id="fgPickQ" type="search" placeholder="Filter favourites" aria-label="Filter favourites" autocapitalize="off" spellcheck="false"></div>
+      <div class="fgopts fgpicks">${keys.map(row).join('')}</div><div class="fgacts"><button type="button" class="primary" data-close>Done</button></div>`
+      : '<p class="muted">No favourites yet. Tap ☆ on any code, then come back here.</p><div class="fgacts"><button type="button" class="primary" data-close>OK</button></div>';
+    openSheet('fgPicker', 'Add to ' + esc(g.name), body, el => {
+      el.addEventListener('change', e => { const c = e.target.closest('input[data-key]'); if (!c) return; if (c.checked) addToGroup(gid, c.dataset.key); else removeFromGroup(gid, c.dataset.key); saveGroups(); refreshSaved(); });
+      const q = $('#fgPickQ', el); if (q) q.addEventListener('input', () => { const v = q.value.trim().toLowerCase(); $$('.fgpick', el).forEach(l => { l.hidden = !!v && !l.dataset.t.includes(v); }); });
+    });
   }
   function openSaved(which) {
     goHome();
@@ -1370,11 +1642,20 @@
       if (e.target.closest('#clearRecent')) { RECENT = []; TS.r = {}; saveLists(); renderSaved(); toast('Recent codes cleared'); return; }
       if (e.target.closest('#expSaved')) { exportSaved(); return; }
       if (e.target.closest('#impSaved')) { const f = $('#impFile'); f.value = ''; f.click(); return; }
+      // v34 favourite groups
+      const tg = e.target.closest('[data-fgtoggle]'); if (tg) { toggleGroup(tg.dataset.fgtoggle); return; }
+      const gm = e.target.closest('[data-fgmenu]'); if (gm) { groupSheet(gm.dataset.fgmenu); return; }
+      const ga = e.target.closest('[data-fgadd]'); if (ga) { groupPicker(ga.dataset.fgadd); return; }
+      if (e.target.closest('#favNewGrp')) { groupEditor(null, id => { if (FAVS.some(k => !heldJur(splitKey(k).jur))) groupPicker(id); }); return; }
+      if (e.target.closest('.favtools')) return;
       const b = e.target.closest('.hit'); if (!b) return;
       if (b.dataset.jur) { switchJur(b.dataset.jur, b.dataset.icd ? '#/medres/' + b.dataset.icd : '#/code/' + b.dataset.code); return; }
       if (b.dataset.icd) showMedRes(b.dataset.icd); else showCode(b.dataset.code);
     });
     $('#impFile').addEventListener('change', e => { const f = e.target.files && e.target.files[0]; if (f) importSaved(f); });
+    $('#results').addEventListener('input', e => { if (e.target.id === 'favq') onFavFilter(e.target.value); });
+    $('#results').addEventListener('keydown', e => { if (e.target.id === 'favq' && e.key === 'Enter') { e.preventDefault(); e.target.blur(); } });
+    $('#results').addEventListener('change', e => { if (e.target.id === 'favSort') { GS.sort = e.target.value === 'az' ? 'az' : 'custom'; saveGroups(); renderSaved(); const s2 = $('#favSort'); if (s2) s2.focus(); } });
     if (FAVS.length) persistStorage();
     $$('[data-saved]').forEach(b => b.addEventListener('click', () => { closeMore(); openSaved(b.dataset.saved); }));
     $('#askGeneral').onclick = () => openAI(generalPrompt());
@@ -1398,7 +1679,7 @@
     const t = e.target; if (!t.closest) return;
     const stop = () => { e.preventDefault(); e.stopPropagation(); };
     const b = t.closest('[data-pick]'); if (b) { stop(); sendPick(b.dataset.code, b.dataset.pick); return; }
-    if (t.closest('#pickbar, [data-fav], [data-copy], [data-medres], .pdet, a[target="_blank"], select, input, summary, #pBack, #pDoc, #askCode, #copyCode, #medBack, #pMore, dialog')) return;
+    if (t.closest('#pickbar, [data-fav], [data-favmenu], .fgh, .favtools, .fgback, #favNewGrp, [data-fgadd], [data-copy], [data-medres], .pdet, a[target="_blank"], select, input, summary, #pBack, #pDoc, #askCode, #copyCode, #medBack, #pMore, dialog')) return;
     const ir = t.closest('.icdrow'); if (ir && ir.dataset.icd) { stop(); sendPick(ir.dataset.icd, 'dx'); return; }
     const h = t.closest('#results .hit');
     if (h) { if (h.dataset.jur) return; if (h.dataset.icd) { stop(); sendPick(h.dataset.icd, 'dx'); } else if (h.dataset.code && p.kind === 'hsc') { stop(); sendPick(h.dataset.code, 'hsc'); } return; }
@@ -1410,6 +1691,10 @@
   // Star toggles run in the capture phase so a tap never opens the row, card or link underneath.
   document.addEventListener('click', e => { const s = e.target.closest && e.target.closest('[data-fav]'); if (!s) return; e.preventDefault(); e.stopPropagation(); if (ready) toggleFav(s.dataset.fav); }, true);
   document.addEventListener('keydown', e => { const s = e.target.closest && e.target.closest('[data-fav]'); if (!s || (e.key !== 'Enter' && e.key !== ' ')) return; e.preventDefault(); e.stopPropagation(); if (ready) toggleFav(s.dataset.fav); }, true);
+  // ⋯ on a favourite inside a group: groups for that code (capture phase, so the row underneath doesn't open)
+  const favMenu = s => { if (ready) codeSheet(s.dataset.favmenu, { from: s.dataset.g }); };
+  document.addEventListener('click', e => { const s = e.target.closest && e.target.closest('[data-favmenu]'); if (!s) return; e.preventDefault(); e.stopPropagation(); favMenu(s); }, true);
+  document.addEventListener('keydown', e => { const s = e.target.closest && e.target.closest('[data-favmenu]'); if (!s || (e.key !== 'Enter' && e.key !== ' ')) return; e.preventDefault(); e.stopPropagation(); favMenu(s); }, true);
   // Home link: bound before data loads. Until the app is ready the plain href="./" reload still lands on home.
   let ready = false;
   $('#homeLink').addEventListener('click', e => { if (!ready) return; e.preventDefault(); goHome(); });
