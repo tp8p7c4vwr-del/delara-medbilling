@@ -171,7 +171,41 @@
     GS.groups.push({ id, name: cleanName(name), type: GTYPES[type] ? type : 'custom', keys: [] });
     return id;
   }
-  const saveLists = () => { LS.set('favs', JSON.stringify(FAVS)); LS.set('recent', JSON.stringify(RECENT)); saveTS(); if (GS.groups.length || LS.get(GKEY, null) != null) saveGroups(); };
+  // ---- Linked favourites (v35): a fee code linked to the ICD-9 code(s) usually billed with it, and back. Stored on this
+  // device only under 'mb.favlinks' = {v:1, pairs:[[<fee key>, <ICD-9 key>], ...]} (same per-jurisdiction keys as favourites).
+  // A link belongs to the pair, so it shows on both codes; at most 3 links per code. A pair is kept while at least one of its
+  // codes is a favourite. Nothing is written until the first link is made, so older versions and existing favourites are untouched.
+  const LKEY = 'favlinks', LMAX = 3;
+  const sameJur = (a, b) => splitKey(a).jur === splitKey(b).jur;
+  function cleanPairs(list) {
+    const out = [], seen = new Set(), cnt = {};
+    (Array.isArray(list) ? list : []).forEach(p => {
+      if (!Array.isArray(p) || p.length !== 2) return; const [h, i] = p;
+      if (typeof h !== 'string' || typeof i !== 'string' || !/^H:[^|]/.test(h) || !/^I:[^|]/.test(i) || !sameJur(h, i)) return;
+      const id = h + '\n' + i; if (seen.has(id) || (cnt[h] || 0) >= LMAX || (cnt[i] || 0) >= LMAX) return;
+      seen.add(id); cnt[h] = (cnt[h] || 0) + 1; cnt[i] = (cnt[i] || 0) + 1; out.push([h, i]);
+    });
+    return out;
+  }
+  let LINKS = (() => { try { const o = JSON.parse(LS.get(LKEY, 'null')); return o && typeof o === 'object' ? cleanPairs(o.pairs) : []; } catch (e) { return []; } })();
+  const linksOf = key => LINKS.filter(p => p[0] === key || p[1] === key).map(p => p[0] === key ? p[1] : p[0]);
+  const isLinked = (a, b) => LINKS.some(p => (p[0] === a && p[1] === b) || (p[0] === b && p[1] === a));
+  function pruneLinks() { const f = new Set(FAVS); LINKS = LINKS.filter(p => f.has(p[0]) || f.has(p[1])); }
+  pruneLinks();
+  const saveLinks = () => { pruneLinks(); if (LINKS.length || LS.get(LKEY, null) != null) LS.set(LKEY, JSON.stringify({ v: 1, pairs: LINKS })); };
+  const kindWord = (key, plural) => key[0] === 'H' ? 'fee code' + (plural ? 's' : '') : (key && splitKey(key).jur === 'AB' ? 'ICD-9 code' : 'diagnostic code') + (plural ? 's' : '');
+  // link two codes (one fee code, one ICD-9 code, same jurisdiction). Returns '' when linked (or already linked), else the reason.
+  function addLink(a, b) {
+    const h = a[0] === 'H' ? a : b, i = a[0] === 'H' ? b : a;
+    if (h[0] !== 'H' || i[0] !== 'I' || !sameJur(h, i)) return 'These two codes cannot be linked.';
+    if (isLinked(h, i)) return '';
+    const capA = linksOf(a), capB = linksOf(b), ca = splitKey(a).code, cb = splitKey(b).code;
+    if (capA.length >= LMAX) return `${ca} already has ${LMAX} linked ${kindWord(b, true)} (the most allowed). Remove one to link ${cb}.`;
+    if (capB.length >= LMAX) return `${cb} is already linked to ${LMAX} ${kindWord(a, true)} (${capB.map(k => splitKey(k).code).join(', ')}), the most allowed. Remove one of its links first.`;
+    LINKS.push([h, i]); return '';
+  }
+  function removeLink(a, b) { LINKS = LINKS.filter(p => !((p[0] === a && p[1] === b) || (p[0] === b && p[1] === a))); }
+  const saveLists = () => { LS.set('favs', JSON.stringify(FAVS)); LS.set('recent', JSON.stringify(RECENT)); saveTS(); if (GS.groups.length || LS.get(GKEY, null) != null) saveGroups(); saveLinks(); };
   // Ask the browser not to evict local data (supported in Chrome, Edge, Firefox, Safari 15.2+). Silent if unsupported or refused.
   function persistStorage() { try { if (navigator.storage && navigator.storage.persist) navigator.storage.persisted().then(p => p || navigator.storage.persist()).catch(() => {}); } catch (e) {} }
   function star(key) {
@@ -191,7 +225,9 @@
     saveLists();
     $$('[data-fav]').forEach(el => { if (el.dataset.fav === key) paintStar(el); });
     refreshSaved();
-    if (on && GS.groups.length) codeSheet(key, { fresh: true }); else toast(on ? 'Added to favourites' : 'Removed from favourites');
+    if (on && GS.groups.length) codeSheet(key, { fresh: true });
+    else if (on && canLink(key)) snack(`Added to favourites. Link the ${partnerWord(key, true)} you usually bill with ${splitKey(key).code}? (optional)`, 'Link ' + partnerShort(key), () => linkSheet(key, { fresh: true }));
+    else toast(on ? 'Added to favourites' : 'Removed from favourites');
   }
   function addRecent(key) {
     RECENT = [key].concat(RECENT.filter(k => k !== key)).slice(0, RECENT_MAX);
@@ -204,9 +240,11 @@
     const now = new Date();
     // version 3 adds "groups" (name, type and member codes; custom order) and "groupSort". Older versions read only
     // "favourites" and "recent", so a new file still imports there: every code arrives, just without its groups.
-    const data = { app: 'MedBilling Fee Desk', kind: 'favourites', version: 3, exported: now.toISOString(),
+    // version 4 adds "links": each fee code ↔ ICD-9 pair ({hsc, icd}); older versions ignore it and import the codes.
+    const data = { app: 'MedBilling Fee Desk', kind: 'favourites', version: 4, exported: now.toISOString(),
       favourites: FAVS.map(k => keyToItem(k, TS.f[k])), recent: RECENT.map(k => keyToItem(k, TS.r[k])),
-      groups: GS.groups.map(g => ({ name: g.name, type: g.type, codes: g.keys.map(k => keyToItem(k)) })), groupSort: GS.sort };
+      groups: GS.groups.map(g => ({ name: g.name, type: g.type, codes: g.keys.map(k => keyToItem(k)) })), groupSort: GS.sort,
+      links: LINKS.map(([h, i]) => ({ hsc: keyToItem(h), icd: keyToItem(i) })) };
     const d = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     const name = `medbilling-fee-desk-favourites-${d}.json`, text = JSON.stringify(data, null, 1);
     const blob = new Blob([text], { type: 'application/json' });
@@ -220,7 +258,7 @@
   function parseImport(text) {
     const o = JSON.parse(text);
     if (!o || typeof o !== 'object' || (!Array.isArray(o.favourites) && !Array.isArray(o.recent))) throw new Error('not a MedBilling Fee Desk favourites file');
-    const conv = arr => (Array.isArray(arr) ? arr : []).map(x => {
+    const one = x => {
       if (!x || typeof x.code !== 'string') return null;
       const code = x.code.trim().toUpperCase(), t = x.type === 'ICD9' ? 'I' : 'H';
       const jur = typeof x.jur === 'string' && /^[A-Z]{2}$/.test(x.jur.toUpperCase()) ? x.jur.toUpperCase() : 'AB';
@@ -229,11 +267,18 @@
       if (jur === JUR ? (t === 'H' ? !BYCODE[code] : !ICDBY[code]) : !/^[A-Z0-9][A-Z0-9.\-]{0,11}$/.test(code)) return null;
       const at = typeof x.at === 'string' && !isNaN(Date.parse(x.at)) ? new Date(x.at).toISOString() : null;
       return { key: t + ':' + (jur === 'AB' ? '' : jur + '|') + code, at };
+    };
+    const conv = arr => (Array.isArray(arr) ? arr : []).map(one).filter(Boolean);
+    // links (version 4+): fee code ↔ ICD-9 pairs; both codes must be valid and from the same jurisdiction
+    const links = (Array.isArray(o.links) ? o.links : []).slice(0, 5000).map(l => {
+      if (!l || typeof l !== 'object' || !l.hsc || !l.icd) return null;
+      const h = one({ ...l.hsc, type: 'HSC' }), i = one({ ...l.icd, type: 'ICD9' });
+      return h && i && sameJur(h.key, i.key) ? [h.key, i.key] : null;
     }).filter(Boolean);
     // groups (version 3+): an old file has none, so its codes simply land in Ungrouped
     const groups = (Array.isArray(o.groups) ? o.groups : []).map(g => g && typeof g === 'object' && cleanName(g.name)
       ? { name: cleanName(g.name), type: GTYPES[g.type] ? g.type : 'custom', keys: [...new Set(conv(g.codes).map(x => x.key))] } : null).filter(Boolean).slice(0, 500);
-    return { fav: conv(o.favourites), rec: conv(o.recent), groups, groupSort: o.groupSort === 'az' ? 'az' : o.groupSort === 'custom' ? 'custom' : null,
+    return { fav: conv(o.favourites), rec: conv(o.recent), groups, links, groupSort: o.groupSort === 'az' ? 'az' : o.groupSort === 'custom' ? 'custom' : null,
       skipped: ((o.favourites || []).length + (o.recent || []).length) };
   }
   function importSaved(file) {
@@ -248,10 +293,15 @@
       p.groups.forEach(g => { const ex = findGroup(g.type, g.name), id = g.type + '|' + g.name.toLowerCase();
         if (!ex && !gSeen.has(id)) gNew++; gSeen.add(id);
         g.keys.forEach(k => { if (willFav.has(k) && !(ex && ex.keys.includes(k))) gPlace++; }); });
+      // links: merged; a pair that would go over 3 links for either code is skipped (existing links are never removed)
+      const trial = LINKS.slice(); let lNew = 0, lCap = 0;
+      p.links.forEach(([h, i]) => { if (!(willFav.has(h) || willFav.has(i))) return; if (trial.some(x => x[0] === h && x[1] === i)) return;
+        const n = k => trial.filter(x => x[0] === k || x[1] === k).length; if (n(h) >= LMAX || n(i) >= LMAX) { lCap++; return; } trial.push([h, i]); lNew++; });
+      const lLine = p.links.length ? `\n• ${lNew} new linked pair${lNew === 1 ? '' : 's'} (fee code ↔ ICD-9)` + (lCap ? `, ${lCap} skipped (a code already has ${LMAX} links)` : '') : '';
       const gLine = p.groups.length ? `\n• ${p.groups.length} group${p.groups.length === 1 ? '' : 's'} (${gNew} new), ${gPlace} code${gPlace === 1 ? '' : 's'} placed in groups`
         : (GS.groups.length && newFav.length ? '\n• No groups in this file: new favourites go to Ungrouped' : '');
-      if (!newFav.length && !p.rec.length && !gNew && !gPlace) { alert('Nothing to import: all favourites in this file are already saved' + (skipped ? ` (${skipped} unknown code${skipped > 1 ? 's' : ''} skipped)` : '') + '.'); return; }
-      if (!confirm(`Import from ${file.name}?\n\n• ${newFav.length} new favourite${newFav.length === 1 ? '' : 's'} (${p.fav.length - newFav.length} already saved)\n• ${p.rec.length} recent code${p.rec.length === 1 ? '' : 's'} merged, newest kept, max ${RECENT_MAX}` + gLine + (skipped ? `\n• ${skipped} unknown code${skipped > 1 ? 's' : ''} skipped` : '') + '\n\nExisting favourites and groups are kept; nothing is deleted.')) return;
+      if (!newFav.length && !p.rec.length && !gNew && !gPlace && !lNew) { alert('Nothing to import: all favourites in this file are already saved' + (skipped ? ` (${skipped} unknown code${skipped > 1 ? 's' : ''} skipped)` : '') + '.'); return; }
+      if (!confirm(`Import from ${file.name}?\n\n• ${newFav.length} new favourite${newFav.length === 1 ? '' : 's'} (${p.fav.length - newFav.length} already saved)\n• ${p.rec.length} recent code${p.rec.length === 1 ? '' : 's'} merged, newest kept, max ${RECENT_MAX}` + gLine + lLine + (skipped ? `\n• ${skipped} unknown code${skipped > 1 ? 's' : ''} skipped` : '') + '\n\nExisting favourites, groups and links are kept; nothing is deleted.')) return;
       const now = new Date().toISOString();
       p.fav.forEach(x => { if (newFav.includes(x.key) && !TS.f[x.key]) TS.f[x.key] = x.at || now; });
       FAVS = FAVS.concat(newFav);
@@ -260,12 +310,13 @@
         g.keys.slice().reverse().forEach(k => { if (willFav.has(k) && !grp.keys.includes(k)) grp.keys.unshift(k); }); });
       if (!hadGroups && p.groupSort) GS.sort = p.groupSort;
       if (p.groups.length) saveGroups();
+      LINKS = trial;
       const rmap = {}; RECENT.forEach(k => rmap[k] = TS.r[k] || ''); p.rec.forEach(x => { const t = x.at || ''; if (!(x.key in rmap) || t > rmap[x.key]) rmap[x.key] = t; });
       const order = Object.keys(rmap).map((k, i) => ({ k, t: rmap[k], i })).sort((a, b) => (b.t > a.t) - (b.t < a.t) || a.i - b.i);
       RECENT = order.slice(0, RECENT_MAX).map(x => x.k); TS.r = {}; order.slice(0, RECENT_MAX).forEach(x => { if (x.t) TS.r[x.k] = x.t; });
       saveLists(); persistStorage();
       refreshSaved();
-      toast(`Imported ${newFav.length} favourite${newFav.length === 1 ? '' : 's'}${p.groups.length ? `, ${p.groups.length} group${p.groups.length === 1 ? '' : 's'}` : ''} and ${p.rec.length} recent`);
+      toast(`Imported ${newFav.length} favourite${newFav.length === 1 ? '' : 's'}${p.groups.length ? `, ${p.groups.length} group${p.groups.length === 1 ? '' : 's'}` : ''}${lNew ? `, ${lNew} link${lNew === 1 ? '' : 's'}` : ''} and ${p.rec.length} recent`);
     };
     r.onerror = () => alert('Import failed: the file could not be read.');
     r.readAsText(file);
@@ -801,11 +852,13 @@
     return Object.keys(by).map(id => { const j = JREG.find(x => x.id === id), n = by[id];
       return `<div class="hit compact heldsaved"><span class="cdesc">${esc(j ? jn(j) : id)}: ${n} saved code${n > 1 ? 's' : ''} hidden until permission is granted.</span><button type="button" class="linkbtn" data-dropheld="${esc(id)}">Remove</button></div>`; }).join('');
   }
-  function savedRow(key, gid) {   // one compact line: bold code, description truncated with an ellipsis, fee/badge, star (+ ⋯ in a group)
+  function savedRow(key, gid, fav) {   // one compact line: bold code, description truncated with an ellipsis, [linked codes], fee/badge, star (+ ⋯ in Favourites)
     const sk = splitKey(key), code = sk.code;
     if (heldJur(sk.jur)) return '';
-    const menu = gid ? `<span class="rowmenu" role="button" tabindex="0" data-favmenu="${esc(key)}" data-g="${esc(gid)}" aria-label="Groups and options for ${esc(code)}" title="Groups and options">⋯</span>` : '';
-    const line = (attrs, cls, cd, desc, right, title) => `<button class="hit compact${cls}" ${attrs} data-fk="${esc(key)}"${title ? ` title="${esc(title)}"` : ''}><span class="ccode code">${esc(cd)}</span><span class="cdesc">${esc(desc)}</span>${right}${star(key)}${sk.t === 'H' && sk.jur === JUR ? pickDet() : ''}${menu}</button>`;
+    fav = fav || !!gid;
+    const menu = fav ? `<span class="rowmenu" role="button" tabindex="0" data-favmenu="${esc(key)}" data-g="${esc(gid || '')}" aria-label="Links, groups and options for ${esc(code)}" title="Linked codes, groups and options">⋯</span>` : '';
+    const lk = fav ? linkChips(key) : '';
+    const line = (attrs, cls, cd, desc, right, title) => `<button class="hit compact${cls}${lk ? ' haslinks' : ''}" ${attrs} data-fk="${esc(key)}"${title ? ` title="${esc(title)}"` : ''}><span class="ccode code">${esc(cd)}</span><span class="cdesc">${esc(desc)}</span>${lk}${right}${star(key)}${sk.t === 'H' && sk.jur === JUR ? pickDet() : ''}${menu}</button>`;
     if (sk.jur !== JUR) {
       const j = JREG.find(x => x.id === sk.jur), nm = j ? jn(j) : sk.jur;
       return line(`data-jur="${esc(sk.jur)}" data-${sk.t === 'H' ? 'code' : 'icd'}="${esc(code)}"`, ' other', code, `${sk.t === 'H' ? 'Fee code' : 'Diagnostic code'} saved under ${nm}. Tap to switch to ${nm}.`, `<span class="badge j">${esc(nm)}</span>`, 'Opens ' + nm);
@@ -823,6 +876,7 @@
     const sk = splitKey(key); let t = sk.code;
     if (sk.jur === JUR) { if (sk.t === 'H' && BYCODE[sk.code]) t += ' ' + BYCODE[sk.code].desc; else if (sk.t === 'I' && ICDBY[sk.code]) t += ' ' + icdLabel(ICDBY[sk.code]); }
     else { const j = JREG.find(x => x.id === sk.jur); if (j) t += ' ' + j.name; }
+    linksOf(key).forEach(k => { t += ' ' + splitKey(k).code; });
     return t.toLowerCase();
   }
   let favFilter = '';
@@ -832,6 +886,103 @@
     custom: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3h4.8l1.6 1.8h6.6V14h-13z"/></svg>',
     ungrouped: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3h4.8l1.6 1.8h6.6V14h-13zM3 6.3V12.5h10V6.3z" fill-rule="evenodd"/></svg>' };
   const typeTag = t => `<span class="fgtype t-${t}">${ICONS[t]}<span>${GTYPES[t]}</span></span>`;
+  // ---- Linked favourites UI (v35)
+  const partnerWord = (key, plural) => (key[0] === 'H' ? (splitKey(key).jur === 'AB' ? 'ICD-9 code' : P && P.meta.dx ? P.meta.dx.system + ' code' : 'diagnostic code') : 'fee code') + (plural ? 's' : '');
+  const partnerShort = key => key[0] === 'H' ? (splitKey(key).jur === 'AB' ? 'ICD-9' : P && P.meta.dx ? P.meta.dx.system : 'Dx') : 'fee codes';
+  // a code can be linked when it is from the jurisdiction on screen and that jurisdiction has the other kind of code to pick from
+  const canLink = key => { const sk = splitKey(key); if (sk.jur !== JUR || heldJur(sk.jur)) return false; return sk.t === 'H' ? !!BYCODE[sk.code] && !!(ICD && ICD.length) : !!ICDBY[sk.code] && !!(CODES && CODES.length); };
+  function shortDesc(key, chip) {   // chip: the code's own title (e.g. "Mild or unspecified pre-eclampsia") unless that alone says too little
+    const sk = splitKey(key); if (sk.jur !== JUR) return '';
+    if (sk.t === 'H') { const c = BYCODE[sk.code]; return c ? c.desc : ''; }
+    const i = ICDBY[sk.code]; if (!i) return '';
+    return chip && i.desc && i.desc.length >= 12 && !/^(unspecified|other|not otherwise)/i.test(i.desc) ? i.desc : icdLabel(i);
+  }
+  const linkCodeTxt = k => { const sk = splitKey(k); return sk.t === 'H' && sk.jur === JUR && BYCODE[sk.code] ? (BYCODE[sk.code].display || sk.code) : sk.code; };
+  // compact chips beside a favourite: code + short description of each linked code (tap: open it; in pick mode: send it)
+  function linkChips(key) {
+    const ls = linksOf(key).filter(k => !heldJur(splitKey(k).jur)); if (!ls.length) return '';
+    const kind = key[0] === 'H' ? partnerShort(key) : 'fee code';
+    const chips = ls.map(k => { const d = shortDesc(k, true), c = linkCodeTxt(k);
+      return `<span class="lchip k-${k[0]}" role="button" tabindex="0" data-lk="${esc(k)}" title="${esc(c + (d ? ' ' + d : ''))}" aria-label="Linked ${esc(kind)} ${esc(c)}${d ? ', ' + esc(d) : ''}"><span class="code">${esc(c)}</span>${d ? `<span class="ld">${esc(d)}</span>` : ''}</span>`; }).join('');
+    const edit = canLink(key) ? `<span class="lchip ledit" role="button" tabindex="0" data-favlink="${esc(key)}" aria-label="Edit linked codes for ${esc(splitKey(key).code)}" title="Edit linked codes">✎</span>` : '';
+    return `<span class="lnks" aria-label="Linked ${esc(key[0] === 'H' ? partnerWord(key, true) : 'fee codes')}"><span class="lnkic" aria-hidden="true">↔</span>${chips}${edit}</span>`;
+  }
+  // a small bar with one action (e.g. after starring: "Link ICD-9"); it never blocks the page and goes away by itself
+  let snackT;
+  function snack(text, label, fn) {
+    let el = $('#snack'); if (!el) { el = document.createElement('div'); el.id = 'snack'; el.className = 'snack'; el.setAttribute('role', 'status'); document.body.appendChild(el); }
+    el.innerHTML = `<span class="snt">${esc(text)}</span><button type="button" class="snb">${esc(label)}</button><button type="button" class="snx" aria-label="Dismiss">×</button>`;
+    el.hidden = false; const tt0 = $('#toast'); if (tt0) tt0.hidden = true;
+    const hide = () => { el.hidden = true; clearTimeout(snackT); };
+    $('.snb', el).onclick = () => { hide(); fn(); }; $('.snx', el).onclick = hide;
+    clearTimeout(snackT); snackT = setTimeout(hide, 8000);
+  }
+  // Link picker: the codes linked to one favourite (remove any), plus a search of the other kind of code (tap to link / unlink)
+  function linkSheet(key, o) {
+    o = o || {}; if (!canLink(key)) return;
+    const sk = splitKey(key), isH = sk.t === 'H', code = linkCodeTxt(key), word = partnerWord(key, true), short = partnerShort(key);
+    const c = isH ? BYCODE[sk.code] : null;
+    let q = '';
+    const body = codeLabel(key) +
+      `<p class="small muted fgnote">${isH ? `Pick the ${esc(word)} you usually bill with this fee code, up to ${LMAX}.` : `Pick the fee codes you usually bill with this diagnosis, up to ${LMAX}.`} Links are optional, show side by side in Favourites and appear on both codes.</p>
+      <p class="fgsub">Linked <span class="lkn" id="lkN"></span></p><div class="lkcur" id="lkCur"></div>
+      <p class="fgerr" id="lkErr" role="alert" hidden></p>
+      <div class="inputwrap fgq"><input id="lkQ" type="search" enterkeyhint="search" autocapitalize="off" spellcheck="false" placeholder="${isH ? `Search ${esc(short)} by code or words` : 'Search fee codes by code or words'}" aria-label="${isH ? `Search ${esc(short)} codes` : 'Search fee codes'}"></div>
+      <p class="fgsub" id="lkResH"></p><div class="fgopts lkres" id="lkRes" role="group" aria-labelledby="lkResH"></div>
+      <div class="fgacts">${o.fresh ? '<button type="button" class="ghost" data-close>Skip</button>' : ''}<button type="button" class="primary" data-lkdone>Done</button></div>`;
+    const title = (o.fresh ? '★ ' : '') + `Link ${isH ? esc(short) : 'fee codes'} to ${esc(code)}`;
+    openSheet('fgLinkSheet', title, body, el => {
+      const err = $('#lkErr', el), inp = $('#lkQ', el);
+      const suggestions = () => {
+        const mine = FAVS.filter(k => k[0] === (isH ? 'I' : 'H') && splitKey(k).jur === JUR);
+        let more = [];
+        if (isH && c) { try { more = suggestIcd(c).rows.map(r => ik(r.i.code)); } catch (e) { more = []; } }
+        if (!isH) more = RECENT.filter(k => k[0] === 'H' && splitKey(k).jur === JUR);
+        return [...new Set(mine.concat(more))].filter(k => isH ? ICDBY[splitKey(k).code] : BYCODE[splitKey(k).code]).slice(0, 12);
+      };
+      const search = v => {
+        const cq = v.toUpperCase().replace(/\s+/g, '');
+        if (isH) {
+          let cq2 = cq; if (P && /^([V\d]\d{2}|E\d{3})\d{1,2}$/.test(cq2)) cq2 = cq2.replace(/^(E\d{3}|[V\d]\d{2})/, '$1.');
+          const rows = /^(V\d{0,2}|\d{1,3}|E\d{0,3})(\.\d{0,2})?$/.test(cq2) ? ICD.filter(i => i.code.startsWith(cq2)).slice(0, 15).map(i => i.code)
+            : icdIndex.search(v, { limit: 15, boost: d => d.i.code.includes('.') ? 1.05 : 1 }).hits.map(h => h.doc.i.code);
+          return rows.map(ik);
+        }
+        const rows = (P ? P.codeRe.test(cq) : /^\d{2}\.\d{0,2}[A-Z]{0,3}$/.test(cq)) ? CODES.filter(x => x.code.startsWith(cq)).slice(0, 15).map(x => x.code)
+          : codeIndex.search(stripContext(v), { limit: 15, boost: d => (d.c.skill && d.c.skill[skill] ? 1.35 : 1) * (codeInSkill(d.c) ? 1.1 : 1) * (d.c.desc ? 1 : 0.5) }).hits.map(h => h.doc.c.code);
+        return rows.map(hk);
+      };
+      const paint = () => {
+        const cur = linksOf(key), full = cur.length >= LMAX;
+        $('#lkN', el).textContent = `${cur.length} of ${LMAX}`;
+        $('#lkCur', el).innerHTML = cur.length ? cur.map(k => { const d = shortDesc(k, true), cd = linkCodeTxt(k);
+          return `<div class="lkrow" title="${esc(cd + ' ' + shortDesc(k))}"><span class="code">${esc(cd)}</span><span class="lkd">${esc(d)}</span><button type="button" class="ghost lkrm" data-unlink="${esc(k)}" aria-label="Remove link to ${esc(cd)}">Remove</button></div>`; }).join('')
+          : `<p class="muted small lknone">No linked ${esc(word)} yet${o.fresh ? ' (you can skip this)' : ''}.</p>`;
+        const list = q ? search(q) : suggestions();
+        $('#lkResH', el).textContent = q ? (list.length ? 'Results' : '') : (list.length ? (isH ? `Your ${short} favourites and suggestions` : 'Your fee code favourites and recent codes') : '');
+        $('#lkRes', el).innerHTML = list.length ? list.map(k => { const on = cur.includes(k), d = shortDesc(k, true), cd = linkCodeTxt(k);
+          return `<button type="button" class="lkopt${!on && full ? ' full' : ''}" data-link="${esc(k)}" aria-pressed="${on}" title="${esc(cd + ' ' + shortDesc(k))}"><span class="code">${esc(cd)}</span><span class="lkd">${esc(d)}</span><span class="lkst">${on ? '✓ Linked' : '+ Link'}</span></button>`; }).join('')
+          : `<p class="muted small lknone">${q ? `No matching ${esc(isH ? word : 'fee codes')}.` : `Type a ${isH ? esc(partnerWord(key)) : 'fee code'} or a few words above.`}</p>`;
+        $('#lkRes', el).classList.toggle('empty', !list.length);
+      };
+      const changed = () => { saveLinks(); refreshSaved(); paint(); };
+      const showErr = m => { err.textContent = m; err.hidden = !m; };
+      paint();
+      inp.addEventListener('input', () => { q = inp.value.trim(); paint(); });
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); inp.blur(); } });
+      el.addEventListener('click', e => {
+        const rm = e.target.closest('[data-unlink]');
+        if (rm) { removeLink(key, rm.dataset.unlink); showErr(''); changed(); toast(`Link removed: ${code} ↔ ${splitKey(rm.dataset.unlink).code}`); return; }
+        const op = e.target.closest('[data-link]');
+        if (op) { const k = op.dataset.link;
+          if (isLinked(key, k)) { removeLink(key, k); showErr(''); changed(); toast(`Link removed: ${code} ↔ ${splitKey(k).code}`); }
+          else { const m = addLink(key, k); showErr(m); if (!m) { changed(); toast(`Linked ${code} ↔ ${splitKey(k).code}`); } }
+          const again = $(`#lkRes [data-link="${CSS.escape(k)}"]`, el); if (again) again.focus({ preventScroll: true });
+          return; }
+        if (e.target.closest('[data-lkdone]')) { closeSheet(); if (o.back) o.back(); }
+      });
+    });
+  }
   function groupsHtml() {
     const q = favFilter.trim().toLowerCase();
     const secs = orderedGroups().map(g => ({ id: g.id, name: g.name, type: g.type, keys: g.keys }));
@@ -857,7 +1008,7 @@
   function renderSaved() {
     const box = $('#results'); box._ctx = null;
     const grouped = GS.groups.length > 0;
-    const fav = grouped ? '' : FAVS.map(k => savedRow(k)).filter(Boolean).join('') + heldSavedRows(FAVS), rec = RECENT.map(k => savedRow(k)).filter(Boolean).join('') + heldSavedRows(RECENT);
+    const fav = grouped ? '' : FAVS.map(k => savedRow(k, '', true)).filter(Boolean).join('') + heldSavedRows(FAVS), rec = RECENT.map(k => savedRow(k)).filter(Boolean).join('') + heldSavedRows(RECENT);
     const sk = esc(skill === 'BASE' ? 'base' : skill);
     const tools = (FAVS.length >= 2 || grouped) ? `<div class="favtools"><div class="inputwrap fgq"><input id="favq" type="search" enterkeyhint="search" autocapitalize="off" spellcheck="false" placeholder="Filter favourites" aria-label="Filter favourites" value="${esc(favFilter)}"></div>${GS.groups.length >= 2 ? `<label class="fgsort"><span>Groups</span><select id="favSort" aria-label="Order of groups"><option value="custom"${GS.sort === 'custom' ? ' selected' : ''}>Custom order</option><option value="az"${GS.sort === 'az' ? ' selected' : ''}>A–Z</option></select></label>` : ''}</div>` : '';
     const favBody = grouped ? `<div id="favgroups" class="favgroups">${groupsHtml()}</div>` : (fav || '<p class="muted small pad savedempty">Tap ☆ on any code to keep it here.</p>');
@@ -927,9 +1078,13 @@
     const code = splitKey(key).code;
     const body = () => {
       const gs = orderedGroups(), mine = new Set(groupsOf(key).map(g => g.id));
-      return codeLabel(key) +
-        `<p class="small muted fgnote">${o.fresh ? 'Choose the group(s) for this code. A code can be in several groups; none ticked = Ungrouped.' : 'Tick the groups this code belongs to. A code can be in several groups; none ticked = Ungrouped.'}</p>
-        <div class="fgopts" role="group" aria-label="Groups">${gs.map(g => groupOpt(g, mine.has(g.id))).join('')}</div>
+      const lk = linksOf(key).filter(k => !heldJur(splitKey(k).jur)), can = canLink(key);
+      const lsec = can || lk.length ? `<div class="lksec"><p class="fgsub">Linked ${esc(partnerWord(key, true))} <span class="lkn">${lk.length} of ${LMAX}</span></p>
+        ${lk.length ? `<div class="lkchips">${lk.map(k => `<span class="lchip k-${k[0]} static"><span class="code">${esc(linkCodeTxt(k))}</span><span class="ld">${esc(shortDesc(k, true))}</span></span>`).join('')}</div>` : `<p class="small muted lknone">${o.fresh ? `Optional: link the ${esc(partnerWord(key, true))} you usually bill with it.` : 'None yet.'}</p>`}
+        ${can ? `<button type="button" class="ghost lkedit" data-linkedit>${lk.length ? 'Edit links…' : 'Link ' + esc(partnerShort(key)) + '…'}</button>` : ''}</div>` : '';
+      return codeLabel(key) + lsec + (gs.length ? `<p class="fgsub">Groups</p>` : '') +
+        (gs.length ? `<p class="small muted fgnote">${o.fresh ? 'Choose the group(s) for this code. A code can be in several groups; none ticked = Ungrouped.' : 'Tick the groups this code belongs to. A code can be in several groups; none ticked = Ungrouped.'}</p>
+        <div class="fgopts" role="group" aria-label="Groups">${gs.map(g => groupOpt(g, mine.has(g.id))).join('')}</div>` : `<p class="small muted fgnote">No groups yet. Use <b>+ New group</b> to sort favourites into folders by specialty, doctor or your own name.</p>`) + `
         ${from && gs.length > 1 ? `<p class="fgsub">Move from ${esc(from.name)} to</p><div class="fgmove">${gs.filter(g => g.id !== from.id).map(g => `<button type="button" class="chip" data-moveto="${esc(g.id)}">${esc(g.name)}</button>`).join('')}</div>` : ''}
         <div class="fgacts"><button type="button" class="ghost" data-newgrp>+ New group</button>${from ? `<button type="button" class="ghost" data-rmfrom>Remove from ${esc(from.name)}</button>` : ''}${o.fresh ? '' : '<button type="button" class="ghost danger" data-unfav>Remove from favourites</button>'}<button type="button" class="primary" data-close>Done</button></div>`;
     };
@@ -942,9 +1097,10 @@
         if (e.target.closest('[data-rmfrom]')) { removeFromGroup(from.id, key); changed(); closeSheet(); toast(`${code} removed from ${from.name}` + (groupsOf(key).length ? '' : ' (now Ungrouped)')); return; }
         if (e.target.closest('[data-unfav]')) { closeSheet(); if (isFav(key)) toggleFav(key); return; }
         if (e.target.closest('[data-newgrp]')) groupEditor(null, id => { addToGroup(id, key); changed(); codeSheet(key, o); });
+        if (e.target.closest('[data-linkedit]')) linkSheet(key, { back: () => codeSheet(key, o) });
       });
     };
-    openSheet('fgCodeSheet', o.fresh ? '★ Added to favourites' : 'Groups for ' + esc(code), body(), wireIt);
+    openSheet('fgCodeSheet', o.fresh ? '★ Added to favourites' : (GS.groups.length ? 'Links and groups for ' : 'Options for ') + esc(code), body(), wireIt);
   }
   // Create or edit a group: type (Specialty / Doctor / Custom) and name
   function groupEditor(gid, then) {
@@ -1679,7 +1835,10 @@
     const t = e.target; if (!t.closest) return;
     const stop = () => { e.preventDefault(); e.stopPropagation(); };
     const b = t.closest('[data-pick]'); if (b) { stop(); sendPick(b.dataset.code, b.dataset.pick); return; }
-    if (t.closest('#pickbar, [data-fav], [data-favmenu], .fgh, .favtools, .fgback, #favNewGrp, [data-fgadd], [data-copy], [data-medres], .pdet, a[target="_blank"], select, input, summary, #pBack, #pDoc, #askCode, #copyCode, #medBack, #pMore, dialog')) return;
+    // v35 linked chip: sends that one code (ICD-9 -> Dx; fee code when picking a fee code). One code per pick, as before.
+    const lc = t.closest('[data-lk]');
+    if (lc) { const s = splitKey(lc.dataset.lk); if (s.jur === JUR) { if (s.t === 'I' && ICDBY[s.code]) { stop(); sendPick(s.code, 'dx'); } else if (s.t === 'H' && p.kind === 'hsc' && BYCODE[s.code]) { stop(); sendPick(s.code, 'hsc'); } } return; }
+    if (t.closest('#pickbar, [data-fav], [data-favmenu], [data-favlink], #snack, .fgh, .favtools, .fgback, #favNewGrp, [data-fgadd], [data-copy], [data-medres], .pdet, a[target="_blank"], select, input, summary, #pBack, #pDoc, #askCode, #copyCode, #medBack, #pMore, dialog')) return;
     const ir = t.closest('.icdrow'); if (ir && ir.dataset.icd) { stop(); sendPick(ir.dataset.icd, 'dx'); return; }
     const h = t.closest('#results .hit');
     if (h) { if (h.dataset.jur) return; if (h.dataset.icd) { stop(); sendPick(h.dataset.icd, 'dx'); } else if (h.dataset.code && p.kind === 'hsc') { stop(); sendPick(h.dataset.code, 'hsc'); } return; }
@@ -1695,6 +1854,14 @@
   const favMenu = s => { if (ready) codeSheet(s.dataset.favmenu, { from: s.dataset.g }); };
   document.addEventListener('click', e => { const s = e.target.closest && e.target.closest('[data-favmenu]'); if (!s) return; e.preventDefault(); e.stopPropagation(); favMenu(s); }, true);
   document.addEventListener('keydown', e => { const s = e.target.closest && e.target.closest('[data-favmenu]'); if (!s || (e.key !== 'Enter' && e.key !== ' ')) return; e.preventDefault(); e.stopPropagation(); favMenu(s); }, true);
+  // v35 linked chips beside a favourite: open the linked code (other province: switch); ✎ opens the link picker
+  const chipAct = s => { if (!ready) return;
+    if (s.dataset.favlink) { linkSheet(s.dataset.favlink); return; }
+    const k = splitKey(s.dataset.lk);
+    if (k.jur !== JUR) { switchJur(k.jur, k.t === 'I' ? '#/medres/' + k.code : '#/code/' + k.code); return; }
+    if (k.t === 'I') { if (ICDBY[k.code]) showMedRes(k.code); } else if (BYCODE[k.code]) showCode(k.code); };
+  document.addEventListener('click', e => { if (e.defaultPrevented) return; const s = e.target.closest && e.target.closest('[data-lk], [data-favlink]'); if (!s || s.closest('.fgback')) return; e.preventDefault(); e.stopPropagation(); chipAct(s); }, true);
+  document.addEventListener('keydown', e => { const s = e.target.closest && e.target.closest('[data-lk], [data-favlink]'); if (!s || s.closest('.fgback') || (e.key !== 'Enter' && e.key !== ' ')) return; e.preventDefault(); e.stopPropagation(); chipAct(s); }, true);
   // Home link: bound before data loads. Until the app is ready the plain href="./" reload still lands on home.
   let ready = false;
   $('#homeLink').addEventListener('click', e => { if (!ready) return; e.preventDefault(); goHome(); });

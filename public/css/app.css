@@ -316,3 +316,60 @@ html.sheet-open{overflow:hidden}
 }
 @media (max-width:480px){.fgsort>span{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}.favtools .fgq{flex:1 1 150px}}
 .fgtoggle,.fgmenu,.rowmenu,.fgnew,.fgitem,.fgopt,.fgsegb{-webkit-tap-highlight-color:rgba(15,118,110,.12)}
+/* v35 linked favourites: fee code ↔ ICD-9 chips beside a favourite, link picker, snack bar */
+#results{container-type:inline-size}
+/* default (narrow list column on desktop, phones): the linked codes sit on a second line under the code, two chips per line */
+.hit.compact.haslinks{flex-wrap:wrap;row-gap:2px}
+.hit.compact.haslinks .cdesc{flex:1 1 0}
+.hit.compact .lnks{order:9;flex:1 0 100%;min-width:0;display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;padding:0 0 4px}
+.lnkic{flex:0 0 auto;color:var(--muted);font-size:.8rem}
+.lchip{position:relative;flex:0 1 auto;min-width:0;display:inline-flex;align-items:center;gap:4px;max-width:calc(50% - 38px);min-height:26px;padding:1px 8px;border:1px solid #99d6cf;border-radius:999px;background:#effaf8;color:var(--ink);font-size:.78rem;line-height:1.2;white-space:nowrap;cursor:pointer;user-select:none;-webkit-user-select:none;touch-action:manipulation;-webkit-tap-highlight-color:rgba(15,118,110,.12)}
+/* wide list (single-column desktop/tablet): side by side on the same line as the code */
+@container (min-width:640px){
+  .hit.compact.haslinks{flex-wrap:nowrap}
+  .hit.compact.haslinks .cdesc{flex:1 1 auto}
+  .hit.compact .lnks{order:0;flex:0 0 auto;max-width:56%;flex-wrap:nowrap;overflow:hidden;padding:0}
+  .lchip{max-width:12em;overflow:hidden}
+}
+.lchip .code{flex:0 0 auto;font-size:.78rem}
+.lchip .ld{min-width:0;overflow:hidden;text-overflow:ellipsis;color:#334155;font-weight:400}
+.lchip.k-H{border-color:#fdba74;background:#fff7ed}.lchip.k-H .code{color:#9a3412}
+.lchip.ledit{flex:0 0 auto;padding:1px 9px;border-style:dashed;background:#fff;color:var(--teal-d);font-size:.85rem}
+.lchip.static{cursor:default;max-width:100%}
+.lchip:focus-visible{outline:2px solid var(--teal);outline-offset:1px}
+@media (hover:hover){.lchip:not(.static):hover{filter:brightness(.96)}}
+html.phone .lchip,html.phone .lchip .code{font-size:.82rem}
+html.phone .lchip{min-height:34px}
+html.phone .lchip::after{content:'';position:absolute;inset:-5px -2px}
+@media (pointer:coarse){.lchip{min-height:34px}.lchip::after{content:'';position:absolute;inset:-5px -2px}}
+.fgbody>.hit.compact.haslinks,#results .hit.compact.haslinks{padding-top:4px;padding-bottom:4px}
+/* link section in the ⋯ sheet and the link picker */
+.lksec{margin:2px 0 6px}
+.lkn{font-weight:600;font-size:.8rem;color:var(--muted);margin-left:4px}
+.lkchips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px}
+.lkedit{min-height:44px}
+.lknone{margin:4px 2px 8px!important;line-height:1.35}
+.lkcur{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:12px;overflow:hidden;margin:0 0 8px}
+.lkcur:has(.lknone){border-style:dashed}
+.lkrow{display:flex;align-items:center;gap:8px;min-height:44px;padding:2px 4px 2px 12px;border-bottom:1px solid #eef1f4}
+.lkrow:last-child{border-bottom:0}
+.lkd{flex:1 1 auto;min-width:0;font-size:.86rem;line-height:1.3;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere}
+.lkrm{flex:0 0 auto;min-height:40px;padding:4px 12px;font-size:.85rem;color:var(--danger);border-color:#fca5a5}
+html.phone .lkrm{min-height:44px}@media (pointer:coarse){.lkrm{min-height:44px}}
+.lkres{max-height:38vh;overflow:auto}
+.lkres.empty{border:0}
+.lkopt{display:flex;align-items:center;gap:10px;width:100%;min-height:44px;padding:6px 12px;border:0;border-bottom:1px solid #eef1f4;background:#fff;color:var(--ink);text-align:left;font:inherit;cursor:pointer;-webkit-tap-highlight-color:rgba(15,118,110,.12)}
+.lkopt:last-child{border-bottom:0}
+.lkopt .code{flex:0 0 auto}
+.lkopt[aria-pressed="true"]{background:#e6f3f2}
+.lkst{flex:0 0 auto;font-size:.8rem;font-weight:700;color:var(--teal-d);white-space:nowrap}
+.lkopt.full .lkst{color:#94a3b8}
+.lkopt:focus-visible{outline:2px solid var(--teal);outline-offset:-2px}
+@media (hover:hover){.lkopt:hover{background:#f6faf9}.lkopt[aria-pressed="true"]:hover{background:#d9efec}}
+.snack{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:55;display:flex;align-items:center;gap:6px;width:max-content;max-width:min(560px,calc(100vw - 20px));padding:6px 6px 6px 14px;border-radius:12px;background:#0f172a;color:#fff;font-size:.88rem;box-shadow:0 8px 24px rgba(15,23,42,.3)}
+.snack[hidden]{display:none}
+.snack .snt{flex:1 1 auto;min-width:0;line-height:1.3}
+.snack .snb{flex:0 0 auto;min-height:40px;padding:0 12px;border:0;border-radius:10px;background:var(--teal-l);color:var(--teal-d);font-weight:700;font-size:.88rem;cursor:pointer}
+.snack .snx{flex:0 0 auto;width:40px;min-height:40px;border:0;background:transparent;color:#cbd5e1;font-size:1.3rem;cursor:pointer;border-radius:10px}
+html.phone .snack .snb,html.phone .snack .snx{min-height:44px}
+html.picking .snack{bottom:calc(64px + env(safe-area-inset-bottom))}
