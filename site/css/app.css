@@ -194,3 +194,6 @@ html.jur-x .abonly,html.jur-soon .needdata,html.noskill .skill,html.noskill .ski
 .hit.compact .cdesc{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink)}
 .hit.compact .fee,.hit.compact .badge,.hit.compact .muted{flex:0 0 auto;white-space:nowrap;font-size:.85rem}
 .hit.compact .star{flex:0 0 auto;min-width:32px;min-height:32px;font-size:1.2rem}
+
+/* v28 privacy/support links */
+.foot .legal{margin:6px 0 2px;text-align:center;font-size:.8rem}
