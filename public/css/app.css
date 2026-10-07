@@ -373,3 +373,62 @@ html.phone .lkrm{min-height:44px}@media (pointer:coarse){.lkrm{min-height:44px}}
 .snack .snx{flex:0 0 auto;width:40px;min-height:40px;border:0;background:transparent;color:#cbd5e1;font-size:1.3rem;cursor:pointer;border-radius:10px}
 html.phone .snack .snb,html.phone .snack .snx{min-height:44px}
 html.picking .snack{bottom:calc(64px + env(safe-area-inset-bottom))}
+/* v36 multi-code pick for MedBilling Logs: ＋ select buttons, the selection tray above the pick bar, and the modifier search */
+.psel{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;width:30px;height:30px;margin-left:6px;border:1.5px solid var(--teal);border-radius:8px;background:#fff;color:var(--teal-d);font-size:1.05rem;font-weight:700;line-height:1;cursor:pointer;position:relative;-webkit-tap-highlight-color:transparent}
+.psel.on{background:var(--teal);color:#fff}
+.psel:focus-visible{outline:2px solid #f59e0b;outline-offset:1px}
+@media (pointer:coarse){.psel::after{content:"";position:absolute;inset:-7px -4px}}
+.hit.compact .psel{width:28px;height:28px;margin-left:4px}
+.pselb{margin:8px 0 8px 8px}.pselb.on{background:var(--teal-l);border-color:var(--teal);color:var(--teal-d)}
+.pickbar .pbplus{display:inline-block;padding:0 4px;border:1.5px solid var(--teal);border-radius:6px;background:#fff;color:var(--teal-d);font-weight:700}
+.pickbar .pbmods{border-color:var(--teal);color:var(--teal-d)}
+.picktray{position:fixed;left:0;right:0;bottom:var(--pbh,52px);z-index:59;display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap;justify-content:space-between;padding:8px 12px;background:#fff;border-top:2px solid var(--teal);box-shadow:0 -4px 12px rgba(15,23,42,.12);max-height:45vh;overflow:auto}
+.picktray .ptrows{display:flex;flex-direction:column;gap:4px;flex:1 1 320px;min-width:0}
+.picktray .ptg{display:flex;align-items:center;flex-wrap:wrap;gap:4px 6px}
+.picktray .ptl{flex:0 0 6.4em;font-size:.78rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+.picktray .ptn{font-weight:600;color:#94a3b8;text-transform:none;letter-spacing:0}
+.picktray .ptc{display:inline-flex;align-items:center;gap:4px;padding:2px 2px 2px 9px;border:1px solid var(--line);border-radius:999px;background:#f8fafc;font-size:.85rem;max-width:100%}
+.picktray .ptc .code{font-weight:700}
+.picktray .ptc.k-H{border-color:#fdba74;background:#fff7ed}.picktray .ptc.k-H .code{color:#9a3412}
+.picktray .ptc.k-I{border-color:#99d5cf;background:#effaf8}.picktray .ptc.k-I .code{color:var(--teal-d)}
+.picktray .ptc.k-M{border-color:#c4b5fd;background:#f5f3ff}.picktray .ptc.k-M .code{color:#5b21b6}
+.picktray .ptf{font-size:.72rem;color:var(--muted)}
+.picktray .ptx{width:28px;height:28px;border:0;border-radius:999px;background:transparent;color:var(--muted);font-size:1.15rem;line-height:1;cursor:pointer;position:relative}
+@media (pointer:coarse){.picktray .ptx::after{content:"";position:absolute;inset:-6px -3px}}
+.picktray .ptacts{display:flex;gap:8px;flex:0 0 auto;margin-left:auto}
+.picktray .ptacts button{min-height:40px}
+html.traying body{padding-bottom:calc(var(--pbh,52px) + var(--trayh,96px) + 12px + env(safe-area-inset-bottom))}
+html.traying .toast,html.traying .snack{bottom:calc(var(--pbh,52px) + var(--trayh,96px) + 8px)}
+@media (max-width:600px){
+  .picktray{padding:6px 10px}
+  .picktray .ptl{flex-basis:5.6em}
+  .picktray .ptacts{flex:1 1 100%;justify-content:flex-end}
+  .picktray .ptacts .primary{flex:1 1 auto}
+}
+.lchip.k-M{border-color:#c4b5fd;background:#f5f3ff}.lchip.k-M .code{color:#5b21b6}
+.lkrow.k-M .lkm{font-size:.7rem;font-weight:700;color:#5b21b6;text-transform:uppercase;letter-spacing:.03em}
+.lkseg{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:4px 0 8px}
+.lkseg button{min-height:40px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--ink);font-weight:600;cursor:pointer}
+.lkseg button.on{border-color:var(--teal);background:var(--teal-l);color:var(--teal-d)}
+.lkseg .lksn{font-weight:500;color:var(--muted);font-size:.8rem}
+/* modifier search */
+.modkinds{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 4px}
+.modkinds .chip.on{background:var(--teal);border-color:var(--teal);color:#fff}
+.modcount{margin:4px 2px 8px}
+.modlist{display:flex;flex-direction:column;gap:6px}
+.mtypehead{margin:14px 2px 2px;font-size:.95rem;display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
+.modrow{background:var(--card);border-radius:10px;padding:8px 12px;box-shadow:0 1px 2px rgba(15,23,42,.06);border-left:4px solid #e2e8f0}
+.modrow.mx{border-left-color:#a78bfa}
+.modrow .mr1{display:flex;align-items:center;gap:8px;min-width:0}
+.modrow .mr1 .code{font-weight:700;color:#5b21b6;flex:0 0 auto}
+.modrow:not(.mx) .mr1 .code{color:#475569}
+.modrow .mname{flex:1 1 auto;min-width:0;font-weight:600;overflow-wrap:anywhere}
+.modrow .mr2{display:flex;flex-wrap:wrap;align-items:center;gap:2px 8px;margin-top:2px;font-size:.78rem;color:var(--muted)}
+.modrow .badge.mk-E{background:#ede9fe;color:#5b21b6;margin:0}.modrow .badge.mk-I{background:#f1f5f9;color:#475569;margin:0}
+.modrow .mdesc{margin-top:4px;font-size:.88rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.modrow .mmore{margin-top:4px;font-size:.85rem}
+.modrow .mmore summary{cursor:pointer;color:var(--teal-d);font-weight:600;min-height:32px;display:flex;align-items:center}
+.modrow .mmore p{margin:4px 0}
+.modsrc{margin:14px 2px 4px;line-height:1.45}
+html.picking .modrow.mx{cursor:pointer}
+@media (hover:hover){html.picking .modrow.mx:hover{outline:2px solid #f59e0b;outline-offset:-2px}}
