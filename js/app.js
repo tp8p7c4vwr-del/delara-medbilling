@@ -27,10 +27,10 @@
         const kind = sp.get('pick'), ctx = sp.get('ctx') || '', ret = okReturn(sp.get('return') || ''), jur = (sp.get('jur') || '').toUpperCase();
         if ((kind === 'hsc' || kind === 'dx') && TOK.test(ctx) && ret) {
           // v36: pv=2 means this MedBilling Logs understands the multi-code return (pick protocol 2); without it, one code per pick as before
-          cur = { kind, ctx, ret: ret.href, native: ret.native, jur: /^[A-Z]{2}$/.test(jur) ? jur : '', v: sp.get('pv') === '2' ? 2 : 1, t: Date.now() };
+          cur = { kind, ctx, ret: ret.href, native: ret.native, jur: /^[A-Z]{2}$/.test(jur) ? jur : '', v: sp.get('pv') === '2' ? 2 : 1, max: Math.min(10, Math.max(3, parseInt(sp.get('pmax'), 10) || 3)), t: Date.now() };
           try { sessionStorage.setItem(SK, JSON.stringify(cur)); } catch (e) {}
         } else { cur = null; try { sessionStorage.removeItem(SK); } catch (e) {} }
-        ['pick', 'ctx', 'return', 'jur', 'pv'].forEach(k => sp.delete(k));
+        ['pick', 'ctx', 'return', 'jur', 'pv', 'pmax'].forEach(k => sp.delete(k));
         const qs = sp.toString(); history.replaceState(null, '', location.pathname + (qs ? '?' + qs : '') + location.hash);
       } else {
         const o = JSON.parse(sessionStorage.getItem(SK) || 'null');
@@ -104,7 +104,7 @@
     if (!p) { if (b) b.remove(); return; }
     if (!b) {
       b = document.createElement('div'); b.id = 'pickbar'; b.className = 'pickbar'; b.setAttribute('role', 'status');
-      b.innerHTML = `<span class="pbtxt">${pickMulti() ? 'Picking for MedBilling Logs: tap a code to send it, or <b class="pbplus">＋</b> to pick several (3 fee, 3 ICD-9, 3 modifiers)' : 'Picking a code for MedBilling Logs, tap a code to send it back'}</span><span class="pbsep" aria-hidden="true"> · </span>${pickMulti() ? '<button type="button" id="pickMods" class="pbcancel pbmods">Modifiers</button>' : ''}<button type="button" id="pickCancel" class="pbcancel">Cancel</button>`;
+      b.innerHTML = `<span class="pbtxt">${pickMulti() ? `Picking for MedBilling Logs: tap a code to send it, or <b class="pbplus">＋</b> to pick several (up to ${tmax()} fee, ${tmax()} ICD-9, ${tmax()} modifiers)` : 'Picking a code for MedBilling Logs, tap a code to send it back'}</span><span class="pbsep" aria-hidden="true"> · </span>${pickMulti() ? '<button type="button" id="pickMods" class="pbcancel pbmods">Modifiers</button>' : ''}<button type="button" id="pickCancel" class="pbcancel">Cancel</button>`;
       document.body.insertBefore(b, document.body.firstChild);
       b.querySelector('#pickCancel').addEventListener('click', () => pickReturn('cancel'));
       const pm = b.querySelector('#pickMods'); if (pm) pm.addEventListener('click', () => { if (location.hash === '#/modifiers') route(); else location.hash = '#/modifiers'; window.scrollTo(0, 0); });
@@ -119,18 +119,20 @@
   // small "Details" chip on a search result while picking a fee code (tapping the rest of the row sends the code)
   const pickDet = () => { const p = PICK.get(); return p && p.kind === 'hsc' ? '<span class="pdet" role="button" tabindex="0" aria-label="Show details">Details</span>' : ''; };
 
-  // ---- Multi-code pick (v36, pick protocol 2; only when MedBilling Logs asked for it with pv=2). Up to 3 fee codes, 3 ICD-9
-  // codes and 3 modifiers are collected in a small tray and sent back together with one "Send to MedBilling Logs". A plain tap
+  // ---- Multi-code pick (v36, pick protocol 2; only when MedBilling Logs asked for it with pv=2). Up to 10 fee codes, 10 ICD-9
+  // codes and 10 modifiers (v37, when Logs sends pmax=10; 3 each for Logs v9l) are collected in a small tray and sent back together with one "Send to MedBilling Logs". A plain tap
   // still sends one code at once, exactly as before, unless something is already selected (then taps add to the selection) or
   // the code is a favourite with linked codes (then the linked set is pre-selected for review). Modifiers and ICD-9 codes can
   // carry the fee code they belong to ("for"), from a linked favourite, so MedBilling Logs can put them beside the right fee
   // code. Only codes travel, as before. The tray lives in this tab's sessionStorage and only for this pick's one-time token.
-  const TRAY_SK = 'mb.picktray.v1', TMAX = 3, TWORD = { H: 'fee code', I: 'ICD-9 code', M: 'modifier' };
+  const TRAY_SK = 'mb.picktray.v1', TWORD = { H: 'fee code', I: 'ICD-9 code', M: 'modifier' };
+  // v37: up to 10 per kind when MedBilling Logs says it accepts them (pmax=10, Logs v9m+); 3 for Logs v9l (pv=2 without pmax)
+  const tmax = () => { const p = PICK.get(); return p && p.max >= 3 && p.max <= 10 ? p.max : 3; };
   const pickMulti = () => { const p = PICK.get(); return !!(p && p.v >= 2) && JUR === 'AB'; };   // Alberta: fee, ICD-9 and AHCIP modifiers
   const emptyTray = () => ({ H: [], I: [], M: [] });
   let TRAY = (() => {
     try { const o = JSON.parse(sessionStorage.getItem(TRAY_SK) || 'null'), p = PICK.get();
-      if (o && p && o.ctx === p.ctx) { const t = emptyTray(); ['H', 'I', 'M'].forEach(k => { t[k] = (Array.isArray(o[k]) ? o[k] : []).filter(x => x && typeof x.c === 'string' && PICK_CODE.test(x.c)).slice(0, TMAX).map(x => ({ c: x.c, f: typeof x.f === 'string' ? x.f : '' })); }); return t; } } catch (e) {}
+      if (o && p && o.ctx === p.ctx) { const t = emptyTray(); ['H', 'I', 'M'].forEach(k => { t[k] = (Array.isArray(o[k]) ? o[k] : []).filter(x => x && typeof x.c === 'string' && PICK_CODE.test(x.c)).slice(0, tmax()).map(x => ({ c: x.c, f: typeof x.f === 'string' ? x.f : '' })); }); return t; } } catch (e) {}
     return emptyTray();
   })();
   const trayN = () => TRAY.H.length + TRAY.I.length + TRAY.M.length;
@@ -139,13 +141,13 @@
   // add one code; '' when added (or already there), else why not
   function trayAdd(t, c, f) {
     const x = TRAY[t].find(y => y.c === c); if (x) { if (f && !x.f) x.f = f; return ''; }
-    if (TRAY[t].length >= TMAX) return `Already ${TMAX} ${TWORD[t]}s selected (the most per send). Remove one first.`;
+    if (TRAY[t].length >= tmax()) return `Already ${tmax()} ${TWORD[t]}s selected (the most per send). Remove one first.`;
     TRAY[t].push({ c, f: f || '' }); return '';
   }
   function trayRemove(t, c) { TRAY[t] = TRAY[t].filter(x => x.c !== c); if (t === 'H') ['I', 'M'].forEach(k => TRAY[k].forEach(x => { if (x.f === c) x.f = ''; })); }
   function trayToggle(t, c) {
     if (inTray(t, c)) { trayRemove(t, c); traySave(); paintTray(); toast(`${t === 'M' ? 'Modifier ' + c : c} removed from the selection`); return; }
-    const m = trayAdd(t, c); traySave(); paintTray(); toast(m || `${t === 'M' ? 'Modifier ' + c : c} selected (${TRAY[t].length} of ${TMAX} ${TWORD[t]}s). Tap Send when ready`, m ? 3200 : 2200);
+    const m = trayAdd(t, c); traySave(); paintTray(); toast(m || `${t === 'M' ? 'Modifier ' + c : c} selected (${TRAY[t].length} of ${tmax()} ${TWORD[t]}s). Tap Send when ready`, m ? 3200 : 2200);
   }
   // a favourite with linked codes: select it with its linked fee / ICD-9 codes and modifiers
   function trayLinked(key) {
@@ -158,13 +160,13 @@
     let added = 0, full = 0;
     sel.forEach(([t, c, f]) => { const had = inTray(t, c); if (trayAdd(t, c, f)) full++; else if (!had) added++; });
     traySave(); paintTray();
-    toast(`Selected ${sk.code} with its ${sel.length - 1} linked code${sel.length === 2 ? '' : 's'}${full ? ` (${full} not added: ${TMAX} per kind at most)` : ''}. Review, then tap Send`, 3800);
+    toast(`Selected ${sk.code} with its ${sel.length - 1} linked code${sel.length === 2 ? '' : 's'}${full ? ` (${full} not added: ${tmax()} per kind at most)` : ''}. Review, then tap Send`, 3800);
     return added;
   }
   const pselBtn = (t, code) => {
     if (!pickMulti() || (t === 'M' && !modOk(code))) return '';
     const on = inTray(t, code);
-    return `<span class="psel${on ? ' on' : ''}" role="button" tabindex="0" data-psel="${t}:${esc(code)}" aria-pressed="${on}" aria-label="${on ? 'Selected' : 'Select'} ${esc(code)} (up to ${TMAX} ${TWORD[t]}s)" title="${on ? 'Selected: tap to remove' : `Select (up to ${TMAX} ${TWORD[t]}s)`}">${on ? '✓' : '＋'}</span>`;
+    return `<span class="psel${on ? ' on' : ''}" role="button" tabindex="0" data-psel="${t}:${esc(code)}" aria-pressed="${on}" aria-label="${on ? 'Selected' : 'Select'} ${esc(code)} (up to ${tmax()} ${TWORD[t]}s)" title="${on ? 'Selected: tap to remove' : `Select (up to ${tmax()} ${TWORD[t]}s)`}">${on ? '✓' : '＋'}</span>`;
   };
   function multiLabel(o) { const all = [].concat(o.fee, o.dx, o.mod); return all.length <= 3 ? all.join(', ') : all.length + ' codes'; }
   function trayPayload() {
@@ -182,14 +184,14 @@
   function paintTray() {
     $$('[data-psel]').forEach(el => { const [t, c] = [el.dataset.psel[0], el.dataset.psel.slice(2)], on = inTray(t, c);
       el.setAttribute('aria-pressed', String(on)); el.classList.toggle('on', on);
-      if (el.classList.contains('psel')) { el.textContent = on ? '✓' : '＋'; el.title = on ? 'Selected: tap to remove' : `Select (up to ${TMAX} ${TWORD[t]}s)`; }
+      if (el.classList.contains('psel')) { el.textContent = on ? '✓' : '＋'; el.title = on ? 'Selected: tap to remove' : `Select (up to ${tmax()} ${TWORD[t]}s)`; }
       else el.textContent = on ? '✓ Selected' : '＋ Select'; });
     let b = document.getElementById('picktray');
     const show = pickMulti() && trayN() > 0;
     document.documentElement.classList.toggle('traying', show);
     if (!show) { if (b) b.remove(); return; }
     if (!b) { b = document.createElement('div'); b.id = 'picktray'; b.className = 'picktray'; b.setAttribute('role', 'region'); b.setAttribute('aria-label', 'Codes selected for MedBilling Logs'); document.body.appendChild(b); }
-    const grp = (t, lab) => TRAY[t].length ? `<div class="ptg"><span class="ptl">${lab} <span class="ptn">${TRAY[t].length}/${TMAX}</span></span>${TRAY[t].map(x =>
+    const grp = (t, lab) => TRAY[t].length ? `<div class="ptg"><span class="ptl">${lab} <span class="ptn">${TRAY[t].length}/${tmax()}</span></span>${TRAY[t].map(x =>
       `<span class="ptc k-${t}"><span class="code">${esc(x.c)}</span>${x.f && t !== 'H' && TRAY.H.some(h => h.c === x.f) ? `<span class="ptf">for ${esc(x.f)}</span>` : ''}<button type="button" class="ptx" data-trayrm="${t}:${esc(x.c)}" aria-label="Remove ${esc(x.c)}">×</button></span>`).join('')}</div>` : '';
     const n = trayN();
     b.innerHTML = `<div class="ptrows">${grp('H', 'Fee')}${grp('I', 'ICD-9')}${grp('M', 'Modifiers')}</div>
