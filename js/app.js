@@ -26,10 +26,11 @@
       if (sp.has('pick') || sp.has('ctx') || sp.has('return')) {
         const kind = sp.get('pick'), ctx = sp.get('ctx') || '', ret = okReturn(sp.get('return') || ''), jur = (sp.get('jur') || '').toUpperCase();
         if ((kind === 'hsc' || kind === 'dx') && TOK.test(ctx) && ret) {
-          cur = { kind, ctx, ret: ret.href, native: ret.native, jur: /^[A-Z]{2}$/.test(jur) ? jur : '', t: Date.now() };
+          // v36: pv=2 means this MedBilling Logs understands the multi-code return (pick protocol 2); without it, one code per pick as before
+          cur = { kind, ctx, ret: ret.href, native: ret.native, jur: /^[A-Z]{2}$/.test(jur) ? jur : '', v: sp.get('pv') === '2' ? 2 : 1, t: Date.now() };
           try { sessionStorage.setItem(SK, JSON.stringify(cur)); } catch (e) {}
         } else { cur = null; try { sessionStorage.removeItem(SK); } catch (e) {} }
-        ['pick', 'ctx', 'return', 'jur'].forEach(k => sp.delete(k));
+        ['pick', 'ctx', 'return', 'jur', 'pv'].forEach(k => sp.delete(k));
         const qs = sp.toString(); history.replaceState(null, '', location.pathname + (qs ? '?' + qs : '') + location.hash);
       } else {
         const o = JSON.parse(sessionStorage.getItem(SK) || 'null');
@@ -38,7 +39,7 @@
     } catch (e) { cur = null; }
     return {
       get: () => cur && Date.now() - cur.t < TTL ? cur : null,
-      clear: () => { cur = null; try { sessionStorage.removeItem(SK); } catch (e) {} },
+      clear: () => { cur = null; try { sessionStorage.removeItem(SK); sessionStorage.removeItem('mb.picktray.v1'); } catch (e) {} },
       setJur: id => { if (!cur) return; cur.jur = id; try { sessionStorage.setItem(SK, JSON.stringify(cur)); } catch (e) {} },
       okReturn
     };
@@ -56,12 +57,17 @@
     });
   }
   let pickSending = false;
+  // type 'pick' (one code: code + kind 'hsc'|'dx', protocol 1), 'multi' (code = {fee, dx, dxFor, mod, modFor}, protocol 2) or 'cancel'
   async function pickReturn(type, code, kind) {
     const p = PICK.get(); if (!p || pickSending) return false;
-    pickSending = true; PICK.clear(); pickBar();
-    const q = type === 'pick' ? `?picked=${encodeURIComponent(code)}&kind=${kind}&ctx=${p.ctx}` : `?pickcancel=1&ctx=${p.ctx}`;
+    pickSending = true; PICK.clear(); pickBar(); paintTray();
+    const enc = a => a.map(encodeURIComponent).join(',');
+    const q = type === 'pick' ? `?picked=${encodeURIComponent(code)}&kind=${kind}&ctx=${p.ctx}`
+      : type === 'multi' ? `?pickv=2&ctx=${p.ctx}` + ['fee', 'dx', 'dxFor', 'mod', 'modFor'].filter(k => code[k].some(Boolean)).map(k => `&${k.toLowerCase()}=${enc(code[k])}`).join('')
+      : `?pickcancel=1&ctx=${p.ctx}`;
     if (p.native) { location.href = p.ret + q; return true; }   // the app's own link; it reopens MedBilling Logs
-    const msg = type === 'pick' ? { type: 'pick', ctx: p.ctx, code, kind, t: Date.now() } : { type: 'cancel', ctx: p.ctx, t: Date.now() };
+    const msg = type === 'pick' ? { type: 'pick', ctx: p.ctx, code, kind, t: Date.now() }
+      : type === 'multi' ? Object.assign({ type: 'pick', v: 2, ctx: p.ctx, t: Date.now() }, code) : { type: 'cancel', ctx: p.ctx, t: Date.now() };
     try { localStorage.setItem('medbilling.pick.v1', JSON.stringify(msg)); } catch (e) {}
     const ack = await pickAsk(msg, 600);
     if (ack) {   // the Logs tab has it: close this tab and go back there
@@ -71,7 +77,7 @@
       if (window.closed) return true;
       // the window could not close itself (e.g. the in-app browser of a Home Screen app): the code is already in
       // MedBilling Logs, so don't reload it (that would lock it); say so and offer the way back
-      pickSent(type === 'pick' ? code : '', p.ret);
+      pickSent(type === 'pick' ? code : type === 'multi' ? multiLabel(code) : '', p.ret);
       return true;
     }
     location.replace(p.ret + q);
@@ -79,7 +85,7 @@
   }
   function pickSent(code, ret) {
     const b = document.createElement('div'); b.id = 'pickbar'; b.className = 'pickbar sent'; b.setAttribute('role', 'status');
-    b.innerHTML = `<span class="pbtxt">${code ? `${esc(code)} is in MedBilling Logs. Close this page (Done) to go back` : 'Pick cancelled. Close this page (Done) to go back'}</span><span class="pbsep" aria-hidden="true"> · </span><button type="button" class="pbcancel" id="pickBack">Back</button>`;
+    b.innerHTML = `<span class="pbtxt">${code ? `${esc(code)} ${/,| codes$/.test(code) ? 'are' : 'is'} in MedBilling Logs. Close this page (Done) to go back` : 'Pick cancelled. Close this page (Done) to go back'}</span><span class="pbsep" aria-hidden="true"> · </span><button type="button" class="pbcancel" id="pickBack">Back</button>`;
     const old = document.getElementById('pickbar'); if (old) old.remove();
     document.documentElement.classList.add('picking'); document.body.insertBefore(b, document.body.firstChild);
     b.querySelector('#pickBack').addEventListener('click', () => location.replace(ret));
@@ -98,18 +104,110 @@
     if (!p) { if (b) b.remove(); return; }
     if (!b) {
       b = document.createElement('div'); b.id = 'pickbar'; b.className = 'pickbar'; b.setAttribute('role', 'status');
-      b.innerHTML = '<span class="pbtxt">Picking a code for MedBilling Logs, tap a code to send it back</span><span class="pbsep" aria-hidden="true"> · </span><button type="button" id="pickCancel" class="pbcancel">Cancel</button>';
+      b.innerHTML = `<span class="pbtxt">${pickMulti() ? 'Picking for MedBilling Logs: tap a code to send it, or <b class="pbplus">＋</b> to pick several (3 fee, 3 ICD-9, 3 modifiers)' : 'Picking a code for MedBilling Logs, tap a code to send it back'}</span><span class="pbsep" aria-hidden="true"> · </span>${pickMulti() ? '<button type="button" id="pickMods" class="pbcancel pbmods">Modifiers</button>' : ''}<button type="button" id="pickCancel" class="pbcancel">Cancel</button>`;
       document.body.insertBefore(b, document.body.firstChild);
       b.querySelector('#pickCancel').addEventListener('click', () => pickReturn('cancel'));
+      const pm = b.querySelector('#pickMods'); if (pm) pm.addEventListener('click', () => { if (location.hash === '#/modifiers') route(); else location.hash = '#/modifiers'; window.scrollTo(0, 0); });
     }
   }
   // "Use … in MedBilling Logs" button on a code page (only in pick mode)
   function pickBtn(kind, code) {
     if (!PICK.get()) return '';
-    return `<button type="button" class="primary pickuse" data-pick="${esc(kind)}" data-code="${esc(code)}">Use ${esc(code)} in MedBilling Logs</button>`;
+    return `<button type="button" class="primary pickuse" data-pick="${esc(kind)}" data-code="${esc(code)}">Use ${esc(code)} in MedBilling Logs</button>` +
+      (pickMulti() ? `<button type="button" class="ghost pselb" data-psel="${kind === 'dx' ? 'I' : 'H'}:${esc(code)}" aria-pressed="false">＋ Select</button>` : '');
   }
   // small "Details" chip on a search result while picking a fee code (tapping the rest of the row sends the code)
   const pickDet = () => { const p = PICK.get(); return p && p.kind === 'hsc' ? '<span class="pdet" role="button" tabindex="0" aria-label="Show details">Details</span>' : ''; };
+
+  // ---- Multi-code pick (v36, pick protocol 2; only when MedBilling Logs asked for it with pv=2). Up to 3 fee codes, 3 ICD-9
+  // codes and 3 modifiers are collected in a small tray and sent back together with one "Send to MedBilling Logs". A plain tap
+  // still sends one code at once, exactly as before, unless something is already selected (then taps add to the selection) or
+  // the code is a favourite with linked codes (then the linked set is pre-selected for review). Modifiers and ICD-9 codes can
+  // carry the fee code they belong to ("for"), from a linked favourite, so MedBilling Logs can put them beside the right fee
+  // code. Only codes travel, as before. The tray lives in this tab's sessionStorage and only for this pick's one-time token.
+  const TRAY_SK = 'mb.picktray.v1', TMAX = 3, TWORD = { H: 'fee code', I: 'ICD-9 code', M: 'modifier' };
+  const pickMulti = () => { const p = PICK.get(); return !!(p && p.v >= 2) && JUR === 'AB'; };   // Alberta: fee, ICD-9 and AHCIP modifiers
+  const emptyTray = () => ({ H: [], I: [], M: [] });
+  let TRAY = (() => {
+    try { const o = JSON.parse(sessionStorage.getItem(TRAY_SK) || 'null'), p = PICK.get();
+      if (o && p && o.ctx === p.ctx) { const t = emptyTray(); ['H', 'I', 'M'].forEach(k => { t[k] = (Array.isArray(o[k]) ? o[k] : []).filter(x => x && typeof x.c === 'string' && PICK_CODE.test(x.c)).slice(0, TMAX).map(x => ({ c: x.c, f: typeof x.f === 'string' ? x.f : '' })); }); return t; } } catch (e) {}
+    return emptyTray();
+  })();
+  const trayN = () => TRAY.H.length + TRAY.I.length + TRAY.M.length;
+  const inTray = (t, c) => TRAY[t].some(x => x.c === c);
+  function traySave() { const p = PICK.get(); try { if (p && trayN()) sessionStorage.setItem(TRAY_SK, JSON.stringify(Object.assign({ ctx: p.ctx }, TRAY))); else sessionStorage.removeItem(TRAY_SK); } catch (e) {} }
+  // add one code; '' when added (or already there), else why not
+  function trayAdd(t, c, f) {
+    const x = TRAY[t].find(y => y.c === c); if (x) { if (f && !x.f) x.f = f; return ''; }
+    if (TRAY[t].length >= TMAX) return `Already ${TMAX} ${TWORD[t]}s selected (the most per send). Remove one first.`;
+    TRAY[t].push({ c, f: f || '' }); return '';
+  }
+  function trayRemove(t, c) { TRAY[t] = TRAY[t].filter(x => x.c !== c); if (t === 'H') ['I', 'M'].forEach(k => TRAY[k].forEach(x => { if (x.f === c) x.f = ''; })); }
+  function trayToggle(t, c) {
+    if (inTray(t, c)) { trayRemove(t, c); traySave(); paintTray(); toast(`${t === 'M' ? 'Modifier ' + c : c} removed from the selection`); return; }
+    const m = trayAdd(t, c); traySave(); paintTray(); toast(m || `${t === 'M' ? 'Modifier ' + c : c} selected (${TRAY[t].length} of ${TMAX} ${TWORD[t]}s). Tap Send when ready`, m ? 3200 : 2200);
+  }
+  // a favourite with linked codes: select it with its linked fee / ICD-9 codes and modifiers
+  function trayLinked(key) {
+    const sk = splitKey(key), own = sk.t, fee = own === 'H' ? sk.code : '';
+    const sel = [[own, sk.code, '']];
+    linksOf(key).forEach(k => { const s = splitKey(k); if (s.jur === JUR) sel.push([s.t, s.code, own === 'I' ? '' : fee]); });
+    const lf = own === 'I' ? linksOf(key).map(k => splitKey(k).code)[0] || '' : fee;
+    if (own === 'I' && lf) sel[0][2] = lf;   // the diagnosis goes with its (first) linked fee code
+    modsOf(key).forEach(k => { const c = splitKey(k).code; if (modOk(c)) sel.push(['M', c, lf]); });
+    let added = 0, full = 0;
+    sel.forEach(([t, c, f]) => { const had = inTray(t, c); if (trayAdd(t, c, f)) full++; else if (!had) added++; });
+    traySave(); paintTray();
+    toast(`Selected ${sk.code} with its ${sel.length - 1} linked code${sel.length === 2 ? '' : 's'}${full ? ` (${full} not added: ${TMAX} per kind at most)` : ''}. Review, then tap Send`, 3800);
+    return added;
+  }
+  const pselBtn = (t, code) => {
+    if (!pickMulti() || (t === 'M' && !modOk(code))) return '';
+    const on = inTray(t, code);
+    return `<span class="psel${on ? ' on' : ''}" role="button" tabindex="0" data-psel="${t}:${esc(code)}" aria-pressed="${on}" aria-label="${on ? 'Selected' : 'Select'} ${esc(code)} (up to ${TMAX} ${TWORD[t]}s)" title="${on ? 'Selected: tap to remove' : `Select (up to ${TMAX} ${TWORD[t]}s)`}">${on ? '✓' : '＋'}</span>`;
+  };
+  function multiLabel(o) { const all = [].concat(o.fee, o.dx, o.mod); return all.length <= 3 ? all.join(', ') : all.length + ' codes'; }
+  function trayPayload() {
+    const fee = TRAY.H.map(x => x.c), forOk = f => fee.includes(f) ? f : '';
+    return { fee, dx: TRAY.I.map(x => x.c), dxFor: TRAY.I.map(x => forOk(x.f)), mod: TRAY.M.map(x => x.c), modFor: TRAY.M.map(x => forOk(x.f)) };
+  }
+  function sendMulti(o) {
+    if (!pickMulti()) return false;
+    const n = o.fee.length + o.dx.length + o.mod.length; if (!n) return false;
+    toast(`Sending ${multiLabel(o)} to MedBilling Logs…`);
+    TRAY = emptyTray(); traySave();
+    pickReturn('multi', o);
+    return true;
+  }
+  function paintTray() {
+    $$('[data-psel]').forEach(el => { const [t, c] = [el.dataset.psel[0], el.dataset.psel.slice(2)], on = inTray(t, c);
+      el.setAttribute('aria-pressed', String(on)); el.classList.toggle('on', on);
+      if (el.classList.contains('psel')) { el.textContent = on ? '✓' : '＋'; el.title = on ? 'Selected: tap to remove' : `Select (up to ${TMAX} ${TWORD[t]}s)`; }
+      else el.textContent = on ? '✓ Selected' : '＋ Select'; });
+    let b = document.getElementById('picktray');
+    const show = pickMulti() && trayN() > 0;
+    document.documentElement.classList.toggle('traying', show);
+    if (!show) { if (b) b.remove(); return; }
+    if (!b) { b = document.createElement('div'); b.id = 'picktray'; b.className = 'picktray'; b.setAttribute('role', 'region'); b.setAttribute('aria-label', 'Codes selected for MedBilling Logs'); document.body.appendChild(b); }
+    const grp = (t, lab) => TRAY[t].length ? `<div class="ptg"><span class="ptl">${lab} <span class="ptn">${TRAY[t].length}/${TMAX}</span></span>${TRAY[t].map(x =>
+      `<span class="ptc k-${t}"><span class="code">${esc(x.c)}</span>${x.f && t !== 'H' && TRAY.H.some(h => h.c === x.f) ? `<span class="ptf">for ${esc(x.f)}</span>` : ''}<button type="button" class="ptx" data-trayrm="${t}:${esc(x.c)}" aria-label="Remove ${esc(x.c)}">×</button></span>`).join('')}</div>` : '';
+    const n = trayN();
+    b.innerHTML = `<div class="ptrows">${grp('H', 'Fee')}${grp('I', 'ICD-9')}${grp('M', 'Modifiers')}</div>
+      <div class="ptacts"><button type="button" class="ghost" id="ptClear">Clear</button><button type="button" class="primary" id="ptSend">Send to MedBilling Logs (${n})</button></div>`;
+    trayFit();
+  }
+  function trayFit() {   // the tray sits right above the pick bar; the page and toasts make room for both
+    const pb = document.getElementById('pickbar'), tr = document.getElementById('picktray'), h = document.documentElement;
+    h.style.setProperty('--pbh', (pb ? pb.offsetHeight : 0) + 'px'); if (tr) h.style.setProperty('--trayh', tr.offsetHeight + 'px');
+  }
+  window.addEventListener('resize', () => { if (document.getElementById('picktray')) trayFit(); });
+  document.addEventListener('click', e => {
+    const b = e.target.closest && e.target.closest('#picktray'); if (!b) return;
+    const rm = e.target.closest('[data-trayrm]');
+    if (rm) { const v = rm.dataset.trayrm; trayRemove(v[0], v.slice(2)); traySave(); paintTray(); const s = $('#ptSend'); if (s) s.focus({ preventScroll: true }); return; }
+    if (e.target.closest('#ptClear')) { TRAY = emptyTray(); traySave(); paintTray(); toast('Selection cleared'); return; }
+    if (e.target.closest('#ptSend')) sendMulti(trayPayload());
+  });
 
   // ---- Jurisdiction (province/territory) picked at the top; remembered on this device. Alberta is the default.
   const JUR = (v => /^[A-Z]{2}$/.test(v) ? v : 'AB')((PICK.get() && PICK.get().jur) || LS.get('jur', 'AB'));   // pick mode: Logs' province for this visit only
@@ -188,11 +286,36 @@
     return out;
   }
   let LINKS = (() => { try { const o = JSON.parse(LS.get(LKEY, 'null')); return o && typeof o === 'object' ? cleanPairs(o.pairs) : []; } catch (e) { return []; } })();
+  // ---- Linked modifiers (v36, Alberta only): a favourite fee code or ICD-9 code linked to up to 3 explicit AHCIP modifiers.
+  // Stored apart from the v35 pairs, under 'mb.favmodlinks' = {v:1, pairs:[[<fee or ICD-9 key>, 'M:<modifier>'], ...]}, so older
+  // versions never see (or drop) them. Modifiers are not favourites themselves: a link lives while its code is a favourite.
+  const MKEY = 'favmodlinks', MCODE = /^[A-Z0-9]{1,8}$/;
+  function cleanModPairs(list) {
+    const out = [], seen = new Set(), cnt = {};
+    (Array.isArray(list) ? list : []).forEach(p => {
+      if (!Array.isArray(p) || p.length !== 2) return; const [k, m] = p;
+      if (typeof k !== 'string' || typeof m !== 'string' || !/^[HI]:[^|]+$/.test(k) || !/^M:/.test(m) || !MCODE.test(m.slice(2))) return;
+      const id = k + '\n' + m; if (seen.has(id) || (cnt[k] || 0) >= LMAX) return;
+      seen.add(id); cnt[k] = (cnt[k] || 0) + 1; out.push([k, m]);
+    });
+    return out;
+  }
+  let MLINKS = (() => { try { const o = JSON.parse(LS.get(MKEY, 'null')); return o && typeof o === 'object' ? cleanModPairs(o.pairs) : []; } catch (e) { return []; } })();
+  const modsOf = key => MLINKS.filter(p => p[0] === key).map(p => p[1]);
+  const isModLinked = (key, m) => MLINKS.some(p => p[0] === key && p[1] === m);
+  function addModLink(key, m) {
+    if (!/^[HI]:[^|]+$/.test(key) || !/^M:/.test(m)) return 'Modifiers can be linked to Alberta fee and ICD-9 codes only.';
+    if (isModLinked(key, m)) return '';
+    if (modsOf(key).length >= LMAX) return `${splitKey(key).code} already has ${LMAX} linked modifiers (the most allowed). Remove one to link ${m.slice(2)}.`;
+    MLINKS.push([key, m]); return '';
+  }
+  function removeModLink(key, m) { MLINKS = MLINKS.filter(p => !(p[0] === key && p[1] === m)); }
   const linksOf = key => LINKS.filter(p => p[0] === key || p[1] === key).map(p => p[0] === key ? p[1] : p[0]);
   const isLinked = (a, b) => LINKS.some(p => (p[0] === a && p[1] === b) || (p[0] === b && p[1] === a));
-  function pruneLinks() { const f = new Set(FAVS); LINKS = LINKS.filter(p => f.has(p[0]) || f.has(p[1])); }
+  function pruneLinks() { const f = new Set(FAVS); LINKS = LINKS.filter(p => f.has(p[0]) || f.has(p[1])); MLINKS = MLINKS.filter(p => f.has(p[0])); }
   pruneLinks();
-  const saveLinks = () => { pruneLinks(); if (LINKS.length || LS.get(LKEY, null) != null) LS.set(LKEY, JSON.stringify({ v: 1, pairs: LINKS })); };
+  const saveLinks = () => { pruneLinks(); if (LINKS.length || LS.get(LKEY, null) != null) LS.set(LKEY, JSON.stringify({ v: 1, pairs: LINKS }));
+    if (MLINKS.length || LS.get(MKEY, null) != null) LS.set(MKEY, JSON.stringify({ v: 1, pairs: MLINKS })); };
   const kindWord = (key, plural) => key[0] === 'H' ? 'fee code' + (plural ? 's' : '') : (key && splitKey(key).jur === 'AB' ? 'ICD-9 code' : 'diagnostic code') + (plural ? 's' : '');
   // link two codes (one fee code, one ICD-9 code, same jurisdiction). Returns '' when linked (or already linked), else the reason.
   function addLink(a, b) {
@@ -241,10 +364,12 @@
     // version 3 adds "groups" (name, type and member codes; custom order) and "groupSort". Older versions read only
     // "favourites" and "recent", so a new file still imports there: every code arrives, just without its groups.
     // version 4 adds "links": each fee code ↔ ICD-9 pair ({hsc, icd}); older versions ignore it and import the codes.
-    const data = { app: 'MedBilling Fee Desk', kind: 'favourites', version: 4, exported: now.toISOString(),
+    // version 5 adds "modLinks": each favourite's linked AHCIP modifiers ({code, modifier}); older versions ignore it.
+    const data = { app: 'MedBilling Fee Desk', kind: 'favourites', version: 5, exported: now.toISOString(),
       favourites: FAVS.map(k => keyToItem(k, TS.f[k])), recent: RECENT.map(k => keyToItem(k, TS.r[k])),
       groups: GS.groups.map(g => ({ name: g.name, type: g.type, codes: g.keys.map(k => keyToItem(k)) })), groupSort: GS.sort,
-      links: LINKS.map(([h, i]) => ({ hsc: keyToItem(h), icd: keyToItem(i) })) };
+      links: LINKS.map(([h, i]) => ({ hsc: keyToItem(h), icd: keyToItem(i) })),
+      modLinks: MLINKS.map(([k, m]) => ({ code: keyToItem(k), modifier: m.slice(2) })) };
     const d = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     const name = `medbilling-fee-desk-favourites-${d}.json`, text = JSON.stringify(data, null, 1);
     const blob = new Blob([text], { type: 'application/json' });
@@ -275,10 +400,16 @@
       const h = one({ ...l.hsc, type: 'HSC' }), i = one({ ...l.icd, type: 'ICD9' });
       return h && i && sameJur(h.key, i.key) ? [h.key, i.key] : null;
     }).filter(Boolean);
+    // modifier links (version 5+): an Alberta fee or ICD-9 code and an explicit modifier from the official list
+    const modLinks = (Array.isArray(o.modLinks) ? o.modLinks : []).slice(0, 5000).map(l => {
+      if (!l || typeof l !== 'object' || !l.code || typeof l.modifier !== 'string') return null;
+      const k = one(l.code), m = l.modifier.trim().toUpperCase();
+      return k && /^[HI]:[^|]+$/.test(k.key) && (MODX ? modOk(m) : MCODE.test(m)) ? [k.key, 'M:' + m] : null;
+    }).filter(Boolean);
     // groups (version 3+): an old file has none, so its codes simply land in Ungrouped
     const groups = (Array.isArray(o.groups) ? o.groups : []).map(g => g && typeof g === 'object' && cleanName(g.name)
       ? { name: cleanName(g.name), type: GTYPES[g.type] ? g.type : 'custom', keys: [...new Set(conv(g.codes).map(x => x.key))] } : null).filter(Boolean).slice(0, 500);
-    return { fav: conv(o.favourites), rec: conv(o.recent), groups, links, groupSort: o.groupSort === 'az' ? 'az' : o.groupSort === 'custom' ? 'custom' : null,
+    return { fav: conv(o.favourites), rec: conv(o.recent), groups, links, modLinks, groupSort: o.groupSort === 'az' ? 'az' : o.groupSort === 'custom' ? 'custom' : null,
       skipped: ((o.favourites || []).length + (o.recent || []).length) };
   }
   function importSaved(file) {
@@ -298,10 +429,14 @@
       p.links.forEach(([h, i]) => { if (!(willFav.has(h) || willFav.has(i))) return; if (trial.some(x => x[0] === h && x[1] === i)) return;
         const n = k => trial.filter(x => x[0] === k || x[1] === k).length; if (n(h) >= LMAX || n(i) >= LMAX) { lCap++; return; } trial.push([h, i]); lNew++; });
       const lLine = p.links.length ? `\n• ${lNew} new linked pair${lNew === 1 ? '' : 's'} (fee code ↔ ICD-9)` + (lCap ? `, ${lCap} skipped (a code already has ${LMAX} links)` : '') : '';
+      const mtrial = MLINKS.slice(); let mNew = 0, mCap = 0;
+      p.modLinks.forEach(([k, m]) => { if (!willFav.has(k) || mtrial.some(x => x[0] === k && x[1] === m)) return;
+        if (mtrial.filter(x => x[0] === k).length >= LMAX) { mCap++; return; } mtrial.push([k, m]); mNew++; });
+      const mLine = p.modLinks.length ? `\n• ${mNew} new linked modifier${mNew === 1 ? '' : 's'}` + (mCap ? `, ${mCap} skipped (a code already has ${LMAX} modifiers)` : '') : '';
       const gLine = p.groups.length ? `\n• ${p.groups.length} group${p.groups.length === 1 ? '' : 's'} (${gNew} new), ${gPlace} code${gPlace === 1 ? '' : 's'} placed in groups`
         : (GS.groups.length && newFav.length ? '\n• No groups in this file: new favourites go to Ungrouped' : '');
-      if (!newFav.length && !p.rec.length && !gNew && !gPlace && !lNew) { alert('Nothing to import: all favourites in this file are already saved' + (skipped ? ` (${skipped} unknown code${skipped > 1 ? 's' : ''} skipped)` : '') + '.'); return; }
-      if (!confirm(`Import from ${file.name}?\n\n• ${newFav.length} new favourite${newFav.length === 1 ? '' : 's'} (${p.fav.length - newFav.length} already saved)\n• ${p.rec.length} recent code${p.rec.length === 1 ? '' : 's'} merged, newest kept, max ${RECENT_MAX}` + gLine + lLine + (skipped ? `\n• ${skipped} unknown code${skipped > 1 ? 's' : ''} skipped` : '') + '\n\nExisting favourites, groups and links are kept; nothing is deleted.')) return;
+      if (!newFav.length && !p.rec.length && !gNew && !gPlace && !lNew && !mNew) { alert('Nothing to import: all favourites in this file are already saved' + (skipped ? ` (${skipped} unknown code${skipped > 1 ? 's' : ''} skipped)` : '') + '.'); return; }
+      if (!confirm(`Import from ${file.name}?\n\n• ${newFav.length} new favourite${newFav.length === 1 ? '' : 's'} (${p.fav.length - newFav.length} already saved)\n• ${p.rec.length} recent code${p.rec.length === 1 ? '' : 's'} merged, newest kept, max ${RECENT_MAX}` + gLine + lLine + mLine + (skipped ? `\n• ${skipped} unknown code${skipped > 1 ? 's' : ''} skipped` : '') + '\n\nExisting favourites, groups and links are kept; nothing is deleted.')) return;
       const now = new Date().toISOString();
       p.fav.forEach(x => { if (newFav.includes(x.key) && !TS.f[x.key]) TS.f[x.key] = x.at || now; });
       FAVS = FAVS.concat(newFav);
@@ -310,13 +445,13 @@
         g.keys.slice().reverse().forEach(k => { if (willFav.has(k) && !grp.keys.includes(k)) grp.keys.unshift(k); }); });
       if (!hadGroups && p.groupSort) GS.sort = p.groupSort;
       if (p.groups.length) saveGroups();
-      LINKS = trial;
+      LINKS = trial; MLINKS = mtrial;
       const rmap = {}; RECENT.forEach(k => rmap[k] = TS.r[k] || ''); p.rec.forEach(x => { const t = x.at || ''; if (!(x.key in rmap) || t > rmap[x.key]) rmap[x.key] = t; });
       const order = Object.keys(rmap).map((k, i) => ({ k, t: rmap[k], i })).sort((a, b) => (b.t > a.t) - (b.t < a.t) || a.i - b.i);
       RECENT = order.slice(0, RECENT_MAX).map(x => x.k); TS.r = {}; order.slice(0, RECENT_MAX).forEach(x => { if (x.t) TS.r[x.k] = x.t; });
       saveLists(); persistStorage();
       refreshSaved();
-      toast(`Imported ${newFav.length} favourite${newFav.length === 1 ? '' : 's'}${p.groups.length ? `, ${p.groups.length} group${p.groups.length === 1 ? '' : 's'}` : ''}${lNew ? `, ${lNew} link${lNew === 1 ? '' : 's'}` : ''} and ${p.rec.length} recent`);
+      toast(`Imported ${newFav.length} favourite${newFav.length === 1 ? '' : 's'}${p.groups.length ? `, ${p.groups.length} group${p.groups.length === 1 ? '' : 's'}` : ''}${lNew + mNew ? `, ${lNew + mNew} link${lNew + mNew === 1 ? '' : 's'}` : ''} and ${p.rec.length} recent`);
     };
     r.onerror = () => alert('Import failed: the file could not be read.');
     r.readAsText(file);
@@ -326,6 +461,9 @@
   const shortDate = iso => { const [y, m, d] = iso.split('-').map(Number); return `${d} ${MONTHS[m - 1].slice(0, 3)} ${y}`; };
 
   let TOP, META, CODES, BYCODE = {}, RULES, RULEBY = {}, MODS, MODTYPE = {}, MODCODE = {}, EXPL, ICD, ICDBY = {}, BULL, BULLBY = {}, RES;
+  let MODX = null, MODXBY = {}, MODXT = {};   // v36 modifier search data (official list, cleaned; see renderMods)
+  const modOk = c => !!(MODXBY[c] && MODXBY[c].k === 'E');   // explicit modifiers only can be linked or sent
+  const modNice = n => { const v = String(n || ''); return v && v === v.toUpperCase() ? v.charAt(0) + v.slice(1).toLowerCase() : v; };
   let codeIndex, icdIndex;
   let JREG = [], JINFO = null, P = null;   // registry, this jurisdiction's registry entry, province data (null for Alberta)
   // Display name: jurisdictions whose permission/licence is still pending carry "(approval pending)". Not used in SI/AI prompts.
@@ -682,10 +820,13 @@
     JINFO = JREG.find(j => j.id === JUR) || JREG[0];
     initJur();
     if (JUR !== 'AB') return bootOther(get);
+    const mx = get('modifier-search').catch(() => null);
     [META, CODES, RULES, MODS, EXPL, ICD, BULL, RES, TOP] = await Promise.all(['meta', 'codes', 'rules', 'modifiers', 'explanatory', 'icd9', 'bulletins', 'resources', 'top-sources'].map(get));
     CODES.forEach(c => BYCODE[c.code] = c);
     RULES.forEach(r => RULEBY[r.id] = r);
     MODS.forEach(t => { MODTYPE[t.type] = t; t.codes.forEach(c => MODCODE[t.type + ':' + c.code] = c); });
+    MODX = await mx;
+    if (MODX && Array.isArray(MODX.codes)) { MODX.types.forEach(t => MODXT[t.t] = t); MODX.codes.forEach(o => { if (!MODXBY[o.c] || o.k === 'E') MODXBY[o.c] = o; }); } else MODX = null;
     ICD.forEach(i => ICDBY[i.code] = i);
     BULL.forEach(b => BULLBY[b.num] = b);
     initSkill();
@@ -747,6 +888,7 @@
     if (kind === 'code' && BYCODE[arg]) { showTab('procedures'); showCode(arg); }
     else if (kind === 'rules') { showTab('rules'); if (arg) setTimeout(() => { const el = document.getElementById('gr-' + arg); if (el) el.scrollIntoView({ block: 'start' }); }, 30); }
     else if (kind === 'medres' && ICDBY[arg]) { showMedRes(arg); }
+    else if (kind === 'modifiers' && arg && JUR === 'AB') { showTab('modifiers'); $('#mf').value = arg; renderMods(); }
     else if (kind && $('#tab-' + kind)) showTab(kind);
     else showTab('procedures');
   }
@@ -831,7 +973,7 @@
     box.innerHTML = hits.map((h, i) => {
       const c = h.doc.c, f = feeFor(c);
       return `<button class="hit${current === c.code ? ' sel' : ''}" data-code="${esc(c.code)}">
-        <div class="row1"><span class="lft"><span class="code">${esc(c.display || c.code)}</span>${star(hk(c.code))}</span><span class="fee">${f.amount == null ? esc(f.label) : money(f.amount)}</span>${pickDet()}</div>
+        <div class="row1"><span class="lft"><span class="code">${esc(c.display || c.code)}</span>${star(hk(c.code))}</span><span class="fee">${f.amount == null ? esc(f.label) : money(f.amount)}</span>${pickDet()}${P ? '' : pselBtn('H', c.code)}</div>
         <div class="hdesc">${esc(c.desc)}</div>
         <div class="score">#${i + 1} · score ${h.score.toFixed(2)} (${Math.round(100 * h.score / top)}%) · ${esc(f.label)}${c.cat ? ' · cat ' + esc(c.cat) : ''}
         ${c.bulletins && c.bulletins.some(b => !b.superseded) ? ' · <span class="badge b">MED ' + c.bulletins[0].num + '</span>' : ''}</div></button>`;
@@ -858,7 +1000,7 @@
     fav = fav || !!gid;
     const menu = fav ? `<span class="rowmenu" role="button" tabindex="0" data-favmenu="${esc(key)}" data-g="${esc(gid || '')}" aria-label="Links, groups and options for ${esc(code)}" title="Linked codes, groups and options">⋯</span>` : '';
     const lk = fav ? linkChips(key) : '';
-    const line = (attrs, cls, cd, desc, right, title) => `<button class="hit compact${cls}${lk ? ' haslinks' : ''}" ${attrs} data-fk="${esc(key)}"${title ? ` title="${esc(title)}"` : ''}><span class="ccode code">${esc(cd)}</span><span class="cdesc">${esc(desc)}</span>${lk}${right}${star(key)}${sk.t === 'H' && sk.jur === JUR ? pickDet() : ''}${menu}</button>`;
+    const line = (attrs, cls, cd, desc, right, title) => `<button class="hit compact${cls}${lk ? ' haslinks' : ''}" ${attrs} data-fk="${esc(key)}"${title ? ` title="${esc(title)}"` : ''}><span class="ccode code">${esc(cd)}</span><span class="cdesc">${esc(desc)}</span>${lk}${right}${!P && sk.jur === JUR && sk.jur === 'AB' ? pselBtn(sk.t, code) : ''}${star(key)}${sk.t === 'H' && sk.jur === JUR ? pickDet() : ''}${menu}</button>`;
     if (sk.jur !== JUR) {
       const j = JREG.find(x => x.id === sk.jur), nm = j ? jn(j) : sk.jur;
       return line(`data-jur="${esc(sk.jur)}" data-${sk.t === 'H' ? 'code' : 'icd'}="${esc(code)}"`, ' other', code, `${sk.t === 'H' ? 'Fee code' : 'Diagnostic code'} saved under ${nm}. Tap to switch to ${nm}.`, `<span class="badge j">${esc(nm)}</span>`, 'Opens ' + nm);
@@ -876,7 +1018,7 @@
     const sk = splitKey(key); let t = sk.code;
     if (sk.jur === JUR) { if (sk.t === 'H' && BYCODE[sk.code]) t += ' ' + BYCODE[sk.code].desc; else if (sk.t === 'I' && ICDBY[sk.code]) t += ' ' + icdLabel(ICDBY[sk.code]); }
     else { const j = JREG.find(x => x.id === sk.jur); if (j) t += ' ' + j.name; }
-    linksOf(key).forEach(k => { t += ' ' + splitKey(k).code; });
+    linksOf(key).concat(modsOf(key)).forEach(k => { t += ' ' + splitKey(k).code; });
     return t.toLowerCase();
   }
   let favFilter = '';
@@ -891,8 +1033,12 @@
   const partnerShort = key => key[0] === 'H' ? (splitKey(key).jur === 'AB' ? 'ICD-9' : P && P.meta.dx ? P.meta.dx.system : 'Dx') : 'fee codes';
   // a code can be linked when it is from the jurisdiction on screen and that jurisdiction has the other kind of code to pick from
   const canLink = key => { const sk = splitKey(key); if (sk.jur !== JUR || heldJur(sk.jur)) return false; return sk.t === 'H' ? !!BYCODE[sk.code] && !!(ICD && ICD.length) : !!ICDBY[sk.code] && !!(CODES && CODES.length); };
+  // v36: explicit AHCIP modifiers can be linked to an Alberta favourite (fee or ICD-9 code) once the official list has loaded
+  const canModLink = key => { const sk = splitKey(key); return JUR === 'AB' && !!MODX && /^[HI]:[^|]+$/.test(key) && (sk.t === 'H' ? !!BYCODE[sk.code] : !!ICDBY[sk.code]); };
+  const modLinksShown = key => JUR === 'AB' && MODX ? modsOf(key).filter(m => modOk(m.slice(2))) : [];
   function shortDesc(key, chip) {   // chip: the code's own title (e.g. "Mild or unspecified pre-eclampsia") unless that alone says too little
-    const sk = splitKey(key); if (sk.jur !== JUR) return '';
+    const sk = splitKey(key); if (sk.t === 'M') { const m = MODXBY[sk.code]; return m ? modNice(m.n) : ''; }
+    if (sk.jur !== JUR) return '';
     if (sk.t === 'H') { const c = BYCODE[sk.code]; return c ? c.desc : ''; }
     const i = ICDBY[sk.code]; if (!i) return '';
     return chip && i.desc && i.desc.length >= 12 && !/^(unspecified|other|not otherwise)/i.test(i.desc) ? i.desc : icdLabel(i);
@@ -900,12 +1046,12 @@
   const linkCodeTxt = k => { const sk = splitKey(k); return sk.t === 'H' && sk.jur === JUR && BYCODE[sk.code] ? (BYCODE[sk.code].display || sk.code) : sk.code; };
   // compact chips beside a favourite: code + short description of each linked code (tap: open it; in pick mode: send it)
   function linkChips(key) {
-    const ls = linksOf(key).filter(k => !heldJur(splitKey(k).jur)); if (!ls.length) return '';
-    const kind = key[0] === 'H' ? partnerShort(key) : 'fee code';
-    const chips = ls.map(k => { const d = shortDesc(k, true), c = linkCodeTxt(k);
-      return `<span class="lchip k-${k[0]}" role="button" tabindex="0" data-lk="${esc(k)}" title="${esc(c + (d ? ' ' + d : ''))}" aria-label="Linked ${esc(kind)} ${esc(c)}${d ? ', ' + esc(d) : ''}"><span class="code">${esc(c)}</span>${d ? `<span class="ld">${esc(d)}</span>` : ''}</span>`; }).join('');
-    const edit = canLink(key) ? `<span class="lchip ledit" role="button" tabindex="0" data-favlink="${esc(key)}" aria-label="Edit linked codes for ${esc(splitKey(key).code)}" title="Edit linked codes">✎</span>` : '';
-    return `<span class="lnks" aria-label="Linked ${esc(key[0] === 'H' ? partnerWord(key, true) : 'fee codes')}"><span class="lnkic" aria-hidden="true">↔</span>${chips}${edit}</span>`;
+    const ls = linksOf(key).filter(k => !heldJur(splitKey(k).jur)).concat(modLinksShown(key)); if (!ls.length) return '';
+    const kind0 = key[0] === 'H' ? partnerShort(key) : 'fee code';
+    const chips = ls.map(k => { const d = shortDesc(k, true), c = linkCodeTxt(k), kind = k[0] === 'M' ? 'modifier' : kind0;
+      return `<span class="lchip k-${k[0]}" role="button" tabindex="0" data-lk="${esc(k)}" title="${esc((k[0] === 'M' ? 'Modifier ' : '') + c + (d ? ' ' + d : ''))}" aria-label="Linked ${esc(kind)} ${esc(c)}${d ? ', ' + esc(d) : ''}"><span class="code">${esc(c)}</span>${d ? `<span class="ld">${esc(d)}</span>` : ''}</span>`; }).join('');
+    const edit = canLink(key) || canModLink(key) ? `<span class="lchip ledit" role="button" tabindex="0" data-favlink="${esc(key)}" aria-label="Edit linked codes for ${esc(splitKey(key).code)}" title="Edit linked codes">✎</span>` : '';
+    return `<span class="lnks" aria-label="Linked codes"><span class="lnkic" aria-hidden="true">↔</span>${chips}${edit}</span>`;
   }
   // a small bar with one action (e.g. after starring: "Link ICD-9"); it never blocks the page and goes away by itself
   let snackT;
@@ -917,23 +1063,33 @@
     $('.snb', el).onclick = () => { hide(); fn(); }; $('.snx', el).onclick = hide;
     clearTimeout(snackT); snackT = setTimeout(hide, 8000);
   }
-  // Link picker: the codes linked to one favourite (remove any), plus a search of the other kind of code (tap to link / unlink)
+  // Link picker: the codes linked to one favourite (remove any), plus a search of the other kind of code (tap to link / unlink).
+  // v36 (Alberta): a second tab links explicit AHCIP modifiers to the same favourite, up to 3.
   function linkSheet(key, o) {
-    o = o || {}; if (!canLink(key)) return;
+    o = o || {}; const canC = canLink(key), canM = canModLink(key); if (!canC && !canM) return;
     const sk = splitKey(key), isH = sk.t === 'H', code = linkCodeTxt(key), word = partnerWord(key, true), short = partnerShort(key);
     const c = isH ? BYCODE[sk.code] : null;
-    let q = '';
+    let q = '', mode = o.mode === 'mod' && canM ? 'mod' : canC ? 'code' : 'mod';
+    const seg = canC && canM ? `<div class="lkseg" role="tablist" aria-label="What to link">
+        <button type="button" role="tab" data-lkmode="code">${isH ? esc(short) : 'Fee codes'} <span class="lksn" data-n="code"></span></button>
+        <button type="button" role="tab" data-lkmode="mod">Modifiers <span class="lksn" data-n="mod"></span></button></div>` : '';
     const body = codeLabel(key) +
-      `<p class="small muted fgnote">${isH ? `Pick the ${esc(word)} you usually bill with this fee code, up to ${LMAX}.` : `Pick the fee codes you usually bill with this diagnosis, up to ${LMAX}.`} Links are optional, show side by side in Favourites and appear on both codes.</p>
+      `<p class="small muted fgnote" id="lkNote"></p>${seg}
       <p class="fgsub">Linked <span class="lkn" id="lkN"></span></p><div class="lkcur" id="lkCur"></div>
       <p class="fgerr" id="lkErr" role="alert" hidden></p>
-      <div class="inputwrap fgq"><input id="lkQ" type="search" enterkeyhint="search" autocapitalize="off" spellcheck="false" placeholder="${isH ? `Search ${esc(short)} by code or words` : 'Search fee codes by code or words'}" aria-label="${isH ? `Search ${esc(short)} codes` : 'Search fee codes'}"></div>
+      <div class="inputwrap fgq"><input id="lkQ" type="search" enterkeyhint="search" autocapitalize="off" spellcheck="false"></div>
       <p class="fgsub" id="lkResH"></p><div class="fgopts lkres" id="lkRes" role="group" aria-labelledby="lkResH"></div>
       <div class="fgacts">${o.fresh ? '<button type="button" class="ghost" data-close>Skip</button>' : ''}<button type="button" class="primary" data-lkdone>Done</button></div>`;
-    const title = (o.fresh ? '★ ' : '') + `Link ${isH ? esc(short) : 'fee codes'} to ${esc(code)}`;
+    const title = (o.fresh ? '★ ' : '') + `Link ${canC ? (isH ? esc(short) : 'fee codes') + (canM ? ' and modifiers' : '') : 'modifiers'} to ${esc(code)}`;
     openSheet('fgLinkSheet', title, body, el => {
       const err = $('#lkErr', el), inp = $('#lkQ', el);
       const suggestions = () => {
+        if (mode === 'mod') {   // explicit modifiers the price list lists for this fee code; for a diagnosis, those of its linked fee codes
+          const hs = isH ? [sk.code] : linksOf(key).map(k => splitKey(k).code);
+          const seen = new Set(); hs.forEach(h => ((BYCODE[h] || {}).mods || []).forEach(m => { if (m[2] && modOk(m[1])) seen.add(m[1]); }));
+          hs.forEach(h => modsOf(isH ? key : hk(h)).forEach(m => seen.add(m.slice(2))));
+          return [...seen].slice(0, 12).map(x => 'M:' + x);
+        }
         const mine = FAVS.filter(k => k[0] === (isH ? 'I' : 'H') && splitKey(k).jur === JUR);
         let more = [];
         if (isH && c) { try { more = suggestIcd(c).rows.map(r => ik(r.i.code)); } catch (e) { more = []; } }
@@ -941,6 +1097,7 @@
         return [...new Set(mine.concat(more))].filter(k => isH ? ICDBY[splitKey(k).code] : BYCODE[splitKey(k).code]).slice(0, 12);
       };
       const search = v => {
+        if (mode === 'mod') return modSearch(v, 'E').slice(0, 15).map(x => 'M:' + x.c);
         const cq = v.toUpperCase().replace(/\s+/g, '');
         if (isH) {
           let cq2 = cq; if (P && /^([V\d]\d{2}|E\d{3})\d{1,2}$/.test(cq2)) cq2 = cq2.replace(/^(E\d{3}|[V\d]\d{2})/, '$1.');
@@ -952,17 +1109,25 @@
           : codeIndex.search(stripContext(v), { limit: 15, boost: d => (d.c.skill && d.c.skill[skill] ? 1.35 : 1) * (codeInSkill(d.c) ? 1.1 : 1) * (d.c.desc ? 1 : 0.5) }).hits.map(h => h.doc.c.code);
         return rows.map(hk);
       };
+      const linked = (k) => k[0] === 'M' ? isModLinked(key, k) : isLinked(key, k);
       const paint = () => {
-        const cur = linksOf(key), full = cur.length >= LMAX;
-        $('#lkN', el).textContent = `${cur.length} of ${LMAX}`;
-        $('#lkCur', el).innerHTML = cur.length ? cur.map(k => { const d = shortDesc(k, true), cd = linkCodeTxt(k);
-          return `<div class="lkrow" title="${esc(cd + ' ' + shortDesc(k))}"><span class="code">${esc(cd)}</span><span class="lkd">${esc(d)}</span><button type="button" class="ghost lkrm" data-unlink="${esc(k)}" aria-label="Remove link to ${esc(cd)}">Remove</button></div>`; }).join('')
-          : `<p class="muted small lknone">No linked ${esc(word)} yet${o.fresh ? ' (you can skip this)' : ''}.</p>`;
+        const curC = canC ? linksOf(key) : [], curM = canM ? modsOf(key).filter(m => modOk(m.slice(2))) : [], cur = mode === 'mod' ? curM : curC, full = cur.length >= LMAX;
+        $('#lkNote', el).textContent = mode === 'mod' ? `Pick the explicit AHCIP modifiers you usually claim with this ${isH ? 'fee code' : 'diagnosis'}, up to ${LMAX} (official SOMB modifier list).`
+          : (isH ? `Pick the ${word} you usually bill with this fee code, up to ${LMAX}.` : `Pick the fee codes you usually bill with this diagnosis, up to ${LMAX}.`) + ' Links are optional, show side by side in Favourites and appear on both codes.';
+        $('#lkN', el).textContent = (canC ? `${isH ? short : 'fee codes'} ${curC.length} of ${LMAX}` : '') + (canC && canM ? ' · ' : '') + (canM ? `modifiers ${curM.length} of ${LMAX}` : '');
+        $$('[data-lkmode]', el).forEach(b => { const on = b.dataset.lkmode === mode; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); });
+        $$('.lksn', el).forEach(n => { n.textContent = `${n.dataset.n === 'mod' ? curM.length : curC.length}/${LMAX}`; });
+        inp.placeholder = mode === 'mod' ? 'Search modifiers by code or words (e.g. CMGP, evening)' : isH ? `Search ${short} by code or words` : 'Search fee codes by code or words';
+        inp.setAttribute('aria-label', mode === 'mod' ? 'Search modifiers' : isH ? `Search ${short} codes` : 'Search fee codes');
+        const allCur = curC.concat(curM);
+        $('#lkCur', el).innerHTML = allCur.length ? allCur.map(k => { const d = shortDesc(k, true), cd = linkCodeTxt(k);
+          return `<div class="lkrow k-${k[0]}" title="${esc(cd + ' ' + shortDesc(k))}"><span class="code">${esc(cd)}</span><span class="lkd">${k[0] === 'M' ? '<span class="lkm">Modifier</span> ' : ''}${esc(d)}</span><button type="button" class="ghost lkrm" data-unlink="${esc(k)}" aria-label="Remove link to ${esc(cd)}">Remove</button></div>`; }).join('')
+          : `<p class="muted small lknone">Nothing linked yet${o.fresh ? ' (you can skip this)' : ''}.</p>`;
         const list = q ? search(q) : suggestions();
-        $('#lkResH', el).textContent = q ? (list.length ? 'Results' : '') : (list.length ? (isH ? `Your ${short} favourites and suggestions` : 'Your fee code favourites and recent codes') : '');
-        $('#lkRes', el).innerHTML = list.length ? list.map(k => { const on = cur.includes(k), d = shortDesc(k, true), cd = linkCodeTxt(k);
+        $('#lkResH', el).textContent = q ? (list.length ? 'Results' : '') : (list.length ? (mode === 'mod' ? (isH ? 'Explicit modifiers listed for this fee code' : 'Modifiers of its linked fee codes') : isH ? `Your ${short} favourites and suggestions` : 'Your fee code favourites and recent codes') : '');
+        $('#lkRes', el).innerHTML = list.length ? list.map(k => { const on = linked(k), d = shortDesc(k, true), cd = linkCodeTxt(k);
           return `<button type="button" class="lkopt${!on && full ? ' full' : ''}" data-link="${esc(k)}" aria-pressed="${on}" title="${esc(cd + ' ' + shortDesc(k))}"><span class="code">${esc(cd)}</span><span class="lkd">${esc(d)}</span><span class="lkst">${on ? '✓ Linked' : '+ Link'}</span></button>`; }).join('')
-          : `<p class="muted small lknone">${q ? `No matching ${esc(isH ? word : 'fee codes')}.` : `Type a ${isH ? esc(partnerWord(key)) : 'fee code'} or a few words above.`}</p>`;
+          : `<p class="muted small lknone">${q ? `No matching ${mode === 'mod' ? 'explicit modifiers' : esc(isH ? word : 'fee codes')}.` : mode === 'mod' ? 'Type a modifier code or a few words above (e.g. CMGP, complex, evening, telehealth).' : `Type a ${isH ? esc(partnerWord(key)) : 'fee code'} or a few words above.`}</p>`;
         $('#lkRes', el).classList.toggle('empty', !list.length);
       };
       const changed = () => { saveLinks(); refreshSaved(); paint(); };
@@ -971,12 +1136,14 @@
       inp.addEventListener('input', () => { q = inp.value.trim(); paint(); });
       inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); inp.blur(); } });
       el.addEventListener('click', e => {
+        const md = e.target.closest('[data-lkmode]');
+        if (md) { mode = md.dataset.lkmode; q = ''; inp.value = ''; showErr(''); paint(); return; }
         const rm = e.target.closest('[data-unlink]');
-        if (rm) { removeLink(key, rm.dataset.unlink); showErr(''); changed(); toast(`Link removed: ${code} ↔ ${splitKey(rm.dataset.unlink).code}`); return; }
+        if (rm) { const k = rm.dataset.unlink; if (k[0] === 'M') removeModLink(key, k); else removeLink(key, k); showErr(''); changed(); toast(`Link removed: ${code} ↔ ${splitKey(k).code}`); return; }
         const op = e.target.closest('[data-link]');
         if (op) { const k = op.dataset.link;
-          if (isLinked(key, k)) { removeLink(key, k); showErr(''); changed(); toast(`Link removed: ${code} ↔ ${splitKey(k).code}`); }
-          else { const m = addLink(key, k); showErr(m); if (!m) { changed(); toast(`Linked ${code} ↔ ${splitKey(k).code}`); } }
+          if (linked(k)) { if (k[0] === 'M') removeModLink(key, k); else removeLink(key, k); showErr(''); changed(); toast(`Link removed: ${code} ↔ ${splitKey(k).code}`); }
+          else { const m = k[0] === 'M' ? addModLink(key, k) : addLink(key, k); showErr(m); if (!m) { changed(); toast(`Linked ${code} ↔ ${k[0] === 'M' ? 'modifier ' : ''}${splitKey(k).code}`); } }
           const again = $(`#lkRes [data-link="${CSS.escape(k)}"]`, el); if (again) again.focus({ preventScroll: true });
           return; }
         if (e.target.closest('[data-lkdone]')) { closeSheet(); if (o.back) o.back(); }
@@ -1078,8 +1245,8 @@
     const code = splitKey(key).code;
     const body = () => {
       const gs = orderedGroups(), mine = new Set(groupsOf(key).map(g => g.id));
-      const lk = linksOf(key).filter(k => !heldJur(splitKey(k).jur)), can = canLink(key);
-      const lsec = can || lk.length ? `<div class="lksec"><p class="fgsub">Linked ${esc(partnerWord(key, true))} <span class="lkn">${lk.length} of ${LMAX}</span></p>
+      const lk0 = linksOf(key).filter(k => !heldJur(splitKey(k).jur)), lm = modLinksShown(key), lk = lk0.concat(lm), can = canLink(key) || canModLink(key);
+      const lsec = can || lk.length ? `<div class="lksec"><p class="fgsub">Linked ${esc(partnerWord(key, true))} <span class="lkn">${lk0.length} of ${LMAX}</span>${canModLink(key) || lm.length ? ` · modifiers <span class="lkn">${lm.length} of ${LMAX}</span>` : ''}</p>
         ${lk.length ? `<div class="lkchips">${lk.map(k => `<span class="lchip k-${k[0]} static"><span class="code">${esc(linkCodeTxt(k))}</span><span class="ld">${esc(shortDesc(k, true))}</span></span>`).join('')}</div>` : `<p class="small muted lknone">${o.fresh ? `Optional: link the ${esc(partnerWord(key, true))} you usually bill with it.` : 'None yet.'}</p>`}
         ${can ? `<button type="button" class="ghost lkedit" data-linkedit>${lk.length ? 'Edit links…' : 'Link ' + esc(partnerShort(key)) + '…'}</button>` : ''}</div>` : '';
       return codeLabel(key) + lsec + (gs.length ? `<p class="fgsub">Groups</p>` : '') +
@@ -1500,7 +1667,7 @@
     if (!rows.length) { el.innerHTML = '<p class="muted small">' + esc(emptyMsg || 'No ICD-9 suggestions in this scope.') + '</p>'; return; }
     el.innerHTML = rows.map(r => `<div class="icdrow" data-icd="${esc(r.i.code)}"><div><span class="code">${esc(r.i.code)}</span> ${esc(icdLabel(r.i))}
       <div class="small muted">${esc(r.i.block || '')}${r.score != null ? ' · score ' + r.score.toFixed(2) : (r.why ? ' · key match' : '')}</div>${r.why ? `<div class="small why">Why suggested: ${esc(r.why)}</div>` : ''}</div>
-      <div class="btns">${PICK.get() ? `<button class="primary pickuse sm" data-pick="dx" data-code="${esc(r.i.code)}" aria-label="Use ${esc(r.i.code)} in MedBilling Logs">Use</button>` : ''}${star(ik(r.i.code))}<button class="ghost" data-copy="${esc(r.i.code)}">Copy</button><button class="ghost" data-medres="${esc(r.i.code)}">More about this condition</button></div></div>`).join('');
+      <div class="btns">${PICK.get() ? `<button class="primary pickuse sm" data-pick="dx" data-code="${esc(r.i.code)}" aria-label="Use ${esc(r.i.code)} in MedBilling Logs">Use</button>` : ''}${pselBtn('I', r.i.code)}${star(ik(r.i.code))}<button class="ghost" data-copy="${esc(r.i.code)}">Copy</button><button class="ghost" data-medres="${esc(r.i.code)}">More about this condition</button></div></div>`).join('');
   }
   function icdSearch(q) {
     const el = $('#icdresults');
@@ -1620,10 +1787,64 @@
     $('#rules').innerHTML = `<p class="small muted">Medical governing rules, SOMB effective ${esc(fmtDate(META.sombEffective))} — ${rows.length} of ${RULES.length} rules. <a target="_blank" rel="noopener noreferrer" href="${esc(pdfUrl('rules'))}">PDF</a></p>` +
       rows.map(r => `<div class="rule" id="gr-${esc(r.id)}"><span class="code">GR ${esc(r.id)}</span>${grLinks(r.text)} <a class="small" target="_blank" rel="noopener noreferrer" href="${esc(pdfUrl('rules'))}#page=${r.page}">p.</a></div>`).join('');
   }
+  // ---- Modifier search (v36): every AHCIP fee modifier from the official "Fee modifier definitions" (SOMB, data/modifier-search.json,
+  // built by scripts/build-modifier-search.py from the Alberta Health PDF; nothing added). Search by code, type or words; each code
+  // shows its meaning, whether it is explicit (entered on the claim) or implicit (derived by the claims system), the type's rule
+  // text and on how many HSCs the price list lists it. In multi-code pick mode, explicit modifiers can be selected (＋ or tap).
+  let modKind = 'all', modKindSet = false;
+  const MODSHOW = 80;
+  function modSearch(q, kind) {
+    const terms = q.toLowerCase().split(/\s+/).filter(Boolean), cq = q.toUpperCase().replace(/\s+/g, ' ').trim(), out = [];
+    MODX.codes.forEach(o => {
+      if ((kind === 'E' && o.k !== 'E') || (kind === 'I' && o.k !== 'I')) return;
+      if (!terms.length) { out.push({ o, s: 0 }); return; }
+      const T = MODXT[o.t] || {}, hay = (o.c + ' ' + o.t + ' ' + (T.n || '') + ' ' + o.n + ' ' + o.x + ' ' + (T.x || '')).toLowerCase();
+      if (!terms.every(w => hay.includes(w))) return;
+      const words = (o.n + ' ' + (T.n || '')).toLowerCase().split(/[^a-z0-9]+/);
+      let s = 1;
+      if (o.c === cq) s = 100; else if (o.c.startsWith(cq)) s = 80; else if (o.t === cq) s = 60; else if (o.t.startsWith(cq)) s = 50;
+      else if (terms.every(w => words.some(x => x.startsWith(w)))) s = 30; else if (terms.every(w => (o.n + ' ' + o.d).toLowerCase().includes(w))) s = 15;
+      out.push({ o, s: s + (o.k === 'E' ? 2 : 0) + Math.min(o.h, 2000) / 4000 });
+    });
+    if (terms.length) out.sort((a, b) => b.s - a.s);
+    return out.map(x => x.o);
+  }
+  function modRow(o) {
+    const T = MODXT[o.t] || {};
+    const acts = o.a.filter(a => a[0]).map(a => esc(a[0]) + (o.a.length > 1 ? ` (${a[1]})` : '')).join('; ');
+    const ex = o.e.map(c => BYCODE[c] ? `<a href="#/code/${esc(c)}">${esc(c)}</a>` : esc(c)).join(', ');
+    return `<div class="modrow${o.k === 'E' ? ' mx' : ''}" data-mod="${esc(o.c)}"${o.k === 'E' ? ' data-mx="1"' : ''}>
+      <div class="mr1"><span class="code">${esc(o.c)}</span><span class="mname">${esc(modNice(o.n))}</span>${pselBtn('M', o.c)}</div>
+      <div class="mr2"><span class="badge mk-${o.k}" title="${o.k === 'E' ? 'Explicit: you enter it on the claim' : 'Implicit: derived by the claims system, not entered on the claim'}">${o.k === 'E' ? 'Explicit' : 'Implicit'}</span><span class="mtype">${esc(o.t)} · ${esc(modNice(T.n || ''))}</span>${o.h ? `<span class="mh">on ${o.h.toLocaleString()} HSC${o.h === 1 ? '' : 's'}</span>` : ''}</div>
+      ${o.d ? `<div class="mdesc">${esc(o.d)}</div>` : ''}
+      <details class="mmore"><summary>When it applies</summary>
+        <p><b>${esc(o.t)}</b> <span class="muted">(${o.k === 'E' ? 'explicit: entered on the claim' : 'implicit: derived by the claims system, not entered on the claim'})</span>: ${esc(T.x || '')}</p>
+        <p><b>${esc(o.c)}</b>: ${esc(o.x)}</p>
+        ${o.h ? `<p>Listed on ${o.h.toLocaleString()} HSC${o.h === 1 ? '' : 's'} in the price list${acts ? ': ' + acts : ''}.${ex ? ' For example ' + ex + (o.h > o.e.length ? ', …' : '') + '.' : ''}</p>` : '<p class="muted">Not listed against specific HSCs in the price list; see the text above.</p>'}
+        <p class="small"><a target="_blank" rel="noopener noreferrer" href="${esc(MODX.source.url)}#page=${o.p}">Fee modifier definitions, page ${o.p}</a></p>
+      </details></div>`;
+  }
+  function modSourceHtml() {
+    const s = MODX.source, c = MODX.counts;
+    return `<p class="small muted modsrc">Source: ${esc(s.publisher)}, Schedule of Medical Benefits: <a target="_blank" rel="noopener noreferrer" href="${esc(s.url)}">${esc(s.title)}</a> (RG122, ${esc(s.edition)} edition, <a target="_blank" rel="noopener noreferrer" href="${esc(s.dataset)}">open.alberta.ca</a>). ${c.codes} modifier codes in ${c.types} types, ${c.explicit} explicit. HSC counts and actions are from the <a target="_blank" rel="noopener noreferrer" href="${esc(s.usage.url)}">${esc(s.usage.title.replace(/^Medical/, 'medical'))}</a>. Only explicit modifiers can be linked or sent to MedBilling Logs. Always confirm modifier rules in the current SOMB.</p>`;
+  }
   function renderMods() {
-    const f = ($('#mf').value || '').trim().toLowerCase();
-    $('#modifiers').innerHTML = MODS.filter(t => !f || t.type.toLowerCase().includes(f) || t.text.toLowerCase().includes(f) || t.codes.some(c => c.code.toLowerCase().includes(f) || c.text.toLowerCase().includes(f)))
-      .map(t => `<div class="rule"><span class="code">${esc(t.type)}</span>${esc(t.text)}${t.codes.length ? `<table><tbody>${t.codes.map(c => `<tr><td class="code">${esc(c.code)}</td><td>${esc(c.text)}</td></tr>`).join('')}</tbody></table>` : ''}</div>`).join('');
+    const f = ($('#mf').value || '').trim();
+    if (!MODX) {   // the search file did not load: the plain list, as before
+      const fl = f.toLowerCase();
+      $('#modifiers').innerHTML = MODS.filter(t => !fl || t.type.toLowerCase().includes(fl) || t.text.toLowerCase().includes(fl) || t.codes.some(c => c.code.toLowerCase().includes(fl) || c.text.toLowerCase().includes(fl)))
+        .map(t => `<div class="rule"><span class="code">${esc(t.type)}</span>${esc(t.text)}${t.codes.length ? `<table><tbody>${t.codes.map(c => `<tr><td class="code">${esc(c.code)}</td><td>${esc(c.text)}</td></tr>`).join('')}</tbody></table>` : ''}</div>`).join('');
+      return;
+    }
+    if (!modKindSet && pickMulti()) modKind = 'E';
+    const rows = modSearch(f, modKind), shown = rows.slice(0, f ? MODSHOW : rows.length);
+    const kinds = `<div class="modkinds" role="group" aria-label="Show">${[['all', 'All'], ['E', 'Explicit (on the claim)'], ['I', 'Implicit (automatic)']].map(([k, l]) => `<button type="button" class="chip${modKind === k ? ' on' : ''}" data-mk="${k}" aria-pressed="${modKind === k}">${l}</button>`).join('')}</div>`;
+    const head = `<p class="small muted modcount" aria-live="polite">${f ? `${rows.length} modifier${rows.length === 1 ? '' : 's'} match${rows.length === 1 ? 'es' : ''}` : `${rows.length} modifier codes`}${rows.length > shown.length ? `, showing the first ${shown.length}; add words to narrow it` : ''}${pickMulti() ? ' · tap an explicit modifier to send it, or ＋ to select it with other codes' : ''}</p>`;
+    let body = '';
+    if (!rows.length) body = `<p class="muted pad">No modifiers match “${esc(f)}”. Try a code (CMGP, EV, TELES) or words such as complex, evening, telehealth, assistant.</p>`;
+    else if (f) body = shown.map(modRow).join('');
+    else { let last = ''; body = shown.map(o => { const T = MODXT[o.t] || {}, h = o.t !== last ? `<h3 class="mtypehead"><span class="code">${esc(o.t)}</span> ${esc(modNice(T.n || ''))} <span class="small muted">${T.k === 'E' ? 'explicit' : 'implicit'}</span></h3>` : ''; last = o.t; return h + modRow(o); }).join(''); }
+    $('#modifiers').innerHTML = kinds + head + `<div class="modlist">${body}</div>` + modSourceHtml();
   }
   function renderExpl() {
     const f = ($('#ef').value || '').trim().toLowerCase();
@@ -1821,7 +2042,8 @@
     icl.addEventListener('click', () => { iq.value = ''; icl.hidden = true; icdSearch(''); iq.focus(); });
     let t; const deb = fn => () => { clearTimeout(t); t = setTimeout(fn, 150); };
     $('#pf').addEventListener('input', deb(renderPrice)); $('#rf').addEventListener('input', deb(renderRules));
-    $('#mf').addEventListener('input', deb(renderMods)); $('#ef').addEventListener('input', deb(renderExpl));
+    $('#mf').addEventListener('input', deb(renderMods));
+    $('#modifiers').addEventListener('click', e => { const b = e.target.closest('[data-mk]'); if (b) { modKind = b.dataset.mk; modKindSet = true; renderMods(); } }); $('#ef').addEventListener('input', deb(renderExpl));
     document.addEventListener('click', e => {
       const c = e.target.closest('[data-copy]'); if (c) { copy(c.dataset.copy, c.dataset.copy + ' copied'); return; }
       const m = e.target.closest('[data-medres]'); if (m) showMedRes(m.dataset.medres);
@@ -1830,22 +2052,46 @@
   }
   // Pick mode taps (capture phase, before rows open their detail). Fee code: a search result, saved row, price-list code,
   // the big code on its page or "Use … in MedBilling Logs". ICD-9: any ICD-9 row (search, suggested list, saved) or its page.
+  // v36: in multi-code mode (pick protocol 2) ＋ selects a code; once something is selected, taps add to the selection; a favourite
+  // with linked codes pre-selects its linked set; otherwise a tap sends that one code, as before (pickTap).
+  function pickTap(code, kind) {
+    code = String(code || '').trim().toUpperCase();
+    if (!pickMulti()) return kind === 'mod' ? false : sendPick(code, kind);
+    const t = kind === 'dx' ? 'I' : kind === 'mod' ? 'M' : 'H';
+    if (t === 'M' && !modOk(code)) return false;
+    if (trayN()) { trayToggle(t, code); return true; }
+    const key = t === 'H' ? hk(code) : t === 'I' ? ik(code) : '';
+    if (key && isFav(key) && (linksOf(key).some(k => splitKey(k).jur === JUR) || modsOf(key).some(m => modOk(m.slice(2))))) { trayLinked(key); return true; }
+    if (t === 'M') return sendMulti({ fee: [], dx: [], dxFor: [], mod: [code], modFor: [''] });
+    return sendPick(code, kind);
+  }
+  function pselKey(v) {   // 'H:03.04A' / 'I:650' / 'M:CMGP' from a ＋ button; must be a real code of this jurisdiction
+    const t = v[0], c = v.slice(2);
+    if (t === 'M') return modOk(c) ? ['M', c] : null;
+    if (t === 'H') return BYCODE[c] ? ['H', c] : null;
+    return t === 'I' && ICDBY[c] ? ['I', c] : null;
+  }
   document.addEventListener('click', e => {
     const p = PICK.get(); if (!p || !ready) return;
     const t = e.target; if (!t.closest) return;
     const stop = () => { e.preventDefault(); e.stopPropagation(); };
-    const b = t.closest('[data-pick]'); if (b) { stop(); sendPick(b.dataset.code, b.dataset.pick); return; }
-    // v35 linked chip: sends that one code (ICD-9 -> Dx; fee code when picking a fee code). One code per pick, as before.
+    if (t.closest('#picktray')) return;
+    const ps = t.closest('[data-psel]'); if (ps) { stop(); const k = pselKey(ps.dataset.psel); if (k) trayToggle(k[0], k[1]); return; }
+    const b = t.closest('[data-pick]'); if (b) { stop(); pickTap(b.dataset.code, b.dataset.pick); return; }
+    // v35 linked chip: sends that one code (ICD-9 -> Dx; fee code when picking a fee code); v36 multi-code: also modifiers, and adds to a selection
     const lc = t.closest('[data-lk]');
-    if (lc) { const s = splitKey(lc.dataset.lk); if (s.jur === JUR) { if (s.t === 'I' && ICDBY[s.code]) { stop(); sendPick(s.code, 'dx'); } else if (s.t === 'H' && p.kind === 'hsc' && BYCODE[s.code]) { stop(); sendPick(s.code, 'hsc'); } } return; }
-    if (t.closest('#pickbar, [data-fav], [data-favmenu], [data-favlink], #snack, .fgh, .favtools, .fgback, #favNewGrp, [data-fgadd], [data-copy], [data-medres], .pdet, a[target="_blank"], select, input, summary, #pBack, #pDoc, #askCode, #copyCode, #medBack, #pMore, dialog')) return;
-    const ir = t.closest('.icdrow'); if (ir && ir.dataset.icd) { stop(); sendPick(ir.dataset.icd, 'dx'); return; }
+    if (lc) { const s = splitKey(lc.dataset.lk); if (s.jur === JUR) { if (s.t === 'I' && ICDBY[s.code]) { stop(); pickTap(s.code, 'dx'); } else if (s.t === 'H' && (p.kind === 'hsc' || (pickMulti() && trayN())) && BYCODE[s.code]) { stop(); pickTap(s.code, 'hsc'); } else if (s.t === 'M' && pickMulti() && modOk(s.code)) { stop(); pickTap(s.code, 'mod'); } } return; }
+    if (t.closest('#pickbar, [data-fav], [data-favmenu], [data-favlink], #snack, .fgh, .favtools, .fgback, #favNewGrp, [data-fgadd], [data-copy], [data-medres], .pdet, a[target="_blank"], select, input, summary, .mmore, #pBack, #pDoc, #askCode, #copyCode, #medBack, #pMore, [data-mk], dialog')) return;
+    const mr = t.closest('.modrow[data-mx]'); if (mr && pickMulti()) { stop(); pickTap(mr.dataset.mod, 'mod'); return; }
+    const ir = t.closest('.icdrow'); if (ir && ir.dataset.icd) { stop(); pickTap(ir.dataset.icd, 'dx'); return; }
     const h = t.closest('#results .hit');
-    if (h) { if (h.dataset.jur) return; if (h.dataset.icd) { stop(); sendPick(h.dataset.icd, 'dx'); } else if (h.dataset.code && p.kind === 'hsc') { stop(); sendPick(h.dataset.code, 'hsc'); } return; }
-    const a = t.closest('#pricelist a.code'); if (a && p.kind === 'hsc') { const m = (a.getAttribute('href') || '').match(/^#\/code\/(.+)$/); if (m && BYCODE[decodeURIComponent(m[1])]) { stop(); sendPick(decodeURIComponent(m[1]), 'hsc'); } return; }
-    if (t.closest('#detail .codebig') && current) { stop(); sendPick(current, 'hsc'); return; }
-    const mc = t.closest('#tab-medres .condhead h2 .code'); if (mc) { stop(); sendPick(mc.textContent, 'dx'); }
+    const hscOk = p.kind === 'hsc' || (pickMulti() && trayN());   // picking a Dx: a fee row opens its details, unless a selection is under way
+    if (h) { if (h.dataset.jur) return; if (h.dataset.icd) { stop(); pickTap(h.dataset.icd, 'dx'); } else if (h.dataset.code && hscOk) { stop(); pickTap(h.dataset.code, 'hsc'); } return; }
+    const a = t.closest('#pricelist a.code'); if (a && hscOk) { const m = (a.getAttribute('href') || '').match(/^#\/code\/(.+)$/); if (m && BYCODE[decodeURIComponent(m[1])]) { stop(); pickTap(decodeURIComponent(m[1]), 'hsc'); } return; }
+    if (t.closest('#detail .codebig') && current) { stop(); pickTap(current, 'hsc'); return; }
+    const mc = t.closest('#tab-medres .condhead h2 .code'); if (mc) { stop(); pickTap(mc.textContent, 'dx'); }
   }, true);
+  document.addEventListener('keydown', e => { const s = e.target.closest && e.target.closest('[data-psel]'); if (!s || (e.key !== 'Enter' && e.key !== ' ')) return; e.preventDefault(); e.stopPropagation(); if (ready) s.click(); }, true);
   document.addEventListener('keydown', e => { const d = e.target.closest && e.target.closest('.pdet'); if (d && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); const h = d.closest('.hit'); if (h && h.dataset.code) showCode(h.dataset.code); } });
   // Star toggles run in the capture phase so a tap never opens the row, card or link underneath.
   document.addEventListener('click', e => { const s = e.target.closest && e.target.closest('[data-fav]'); if (!s) return; e.preventDefault(); e.stopPropagation(); if (ready) toggleFav(s.dataset.fav); }, true);
@@ -1858,6 +2104,7 @@
   const chipAct = s => { if (!ready) return;
     if (s.dataset.favlink) { linkSheet(s.dataset.favlink); return; }
     const k = splitKey(s.dataset.lk);
+    if (k.t === 'M') { if (JUR === 'AB') { showTab('modifiers'); $('#mf').value = k.code; renderMods(); history.replaceState(null, '', '#/modifiers/' + encodeURIComponent(k.code)); window.scrollTo(0, 0); } return; }
     if (k.jur !== JUR) { switchJur(k.jur, k.t === 'I' ? '#/medres/' + k.code : '#/code/' + k.code); return; }
     if (k.t === 'I') { if (ICDBY[k.code]) showMedRes(k.code); } else if (BYCODE[k.code]) showCode(k.code); };
   document.addEventListener('click', e => { if (e.defaultPrevented) return; const s = e.target.closest && e.target.closest('[data-lk], [data-favlink]'); if (!s || s.closest('.fgback')) return; e.preventDefault(); e.stopPropagation(); chipAct(s); }, true);
@@ -1879,5 +2126,5 @@
   }
 
   pickBar();
-  boot().then(() => { ready = true; }).catch(err => { document.body.insertAdjacentHTML('afterbegin', '<p class="pad warn">Could not load data files. Serve this folder over http (e.g. python3 -m http.server).</p>'); console.error(err); });
+  boot().then(() => { ready = true; paintTray(); }).catch(err => { document.body.insertAdjacentHTML('afterbegin', '<p class="pad warn">Could not load data files. Serve this folder over http (e.g. python3 -m http.server).</p>'); console.error(err); });
 })();
