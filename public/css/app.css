@@ -436,3 +436,32 @@ html.traying .toast,html.traying .snack{bottom:calc(var(--pbh,52px) + var(--tray
 .modsrc{margin:14px 2px 4px;line-height:1.45}
 html.picking .modrow.mx{cursor:pointer}
 @media (hover:hover){html.picking .modrow.mx:hover{outline:2px solid #f59e0b;outline-offset:-2px}}
+
+/* v38 code groups: sort toggle (A–Z / Recent / My order), last used, modifiers in a group, Send group (multi-code pick), Modifiers tab "+ Group" */
+.fgsort{flex-wrap:nowrap}
+.fgsortb{min-height:36px;padding:0 11px;border:1px solid var(--line);margin-left:-1px;background:#fff;color:var(--ink);font-size:.82rem;font-weight:600;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:rgba(15,118,110,.12)}
+.fgsort>span+.fgsortb,.fgsort>.fgsortb:first-child{border-radius:10px 0 0 10px;margin-left:0}
+.fgsortb:last-child{border-radius:0 10px 10px 0}
+.fgsortb[aria-checked="true"]{position:relative;z-index:1;border-color:var(--teal);background:var(--teal-l);color:var(--teal-d)}
+.fgsortb:focus-visible,.fgsend:focus-visible,.mgrp:focus-visible{outline:2px solid var(--teal);outline-offset:1px}
+html.phone .fgsortb{min-height:44px}
+@media (pointer:coarse){.fgsortb{min-height:44px}}
+.fgwhen{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.72rem;color:var(--muted)}
+.fgname{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fgsend{flex:0 0 auto;align-self:center;margin:0 4px;min-height:34px;padding:0 14px;border:0;border-radius:999px;background:var(--teal);color:#fff;font-size:.82rem;font-weight:700;cursor:pointer;touch-action:manipulation}
+html.phone .fgsend{min-height:40px}
+@media (pointer:coarse){.fgsend{min-height:40px}}
+#results .hit.gmod .ccode{color:#5b21b6}
+.fgused{margin:0 0 6px}
+.fgaddseg{gap:4px}
+.fgaddseg button{padding:0 4px;font-size:.85rem}
+.lkopt.k-M .code,.gsend .k-M .code{color:#5b21b6}
+.gsend .fgopt .code{flex:0 0 auto;font-weight:700}
+.gsend .fgopt .fgpl{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.88rem;color:var(--muted)}
+.gsover{margin:4px 0}
+.mgrp{flex:0 0 auto;margin-left:auto;min-height:28px;padding:0 10px;border:1px solid #c4b5fd;border-radius:999px;background:#fff;color:#5b21b6;font-size:.76rem;font-weight:600;cursor:pointer;white-space:nowrap;touch-action:manipulation}
+html.phone .mgrp{min-height:36px}
+@media (pointer:coarse){.mgrp{min-height:36px}}
+@media (max-width:480px){.fgh:has(.fgsend) .fgtype span,.fgtoggle:has(.fgwhen) .fgtype span{display:none}.fgh:has(.fgsend) .fgtype,.fgtoggle:has(.fgwhen) .fgtype{padding:1px 4px}.fgsortb{padding:0 9px}}
+.fgaddseg.n2{grid-template-columns:1fr 1fr}.fgaddseg.n3{grid-template-columns:repeat(3,1fr)}.fgaddseg.n4{grid-template-columns:repeat(4,1fr)}
+.gmod .gsp{flex:0 0 auto;min-width:32px}html.phone .gmod .gsp{min-width:44px}@media (pointer:coarse){.gmod .gsp{min-width:44px}}
