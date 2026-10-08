@@ -176,6 +176,7 @@
   function sendMulti(o) {
     if (!pickMulti()) return false;
     const n = o.fee.length + o.dx.length + o.mod.length; if (!n) return false;
+    o.fee.forEach(c => touchKey(hk(c))); o.dx.forEach(c => touchKey(ik(c))); o.mod.forEach(c => touchKey('M:' + c));   // v38: groups holding these codes were used
     toast(`Sending ${multiLabel(o)} to MedBilling Logs…`);
     TRAY = emptyTray(); traySave();
     pickReturn('multi', o);
@@ -236,17 +237,33 @@
     'Ophthalmology', 'Otolaryngology (ENT)', 'Palliative Care', 'Pathology', 'Physical Medicine & Rehabilitation', 'Plastic Surgery',
     'Radiology', 'Respirology', 'Rheumatology', 'Sports Medicine', 'Thoracic Surgery', 'Urology', 'Vascular Surgery'];
   const cleanName = v => String(v == null ? '' : v).replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
+  // ---- Code groups (v38, Jose Oct 7 8:46 PM): a group is a named bundle of codes billed together (e.g. "C-section", "Clinic visit").
+  // Besides its fee and ICD-9 favourites it can hold explicit AHCIP modifiers (Alberta), and the group list sorts A–Z, by most
+  // recently used, or in your own order. Those extras live apart from 'mb.favgroups', under 'mb.favgroupx' =
+  // {v:1, sort:'az'|'recent'|'custom', used:{<group id>: ISO time}, mods:{<group id>: ['CMGP', ...]}}, so older versions keep
+  // reading (and writing) the groups exactly as before. "Used" = the group was opened, or a code in it was opened, picked or sent.
+  const XKEY = 'favgroupx', GSORTS = ['az', 'recent', 'custom'];
+  function readGroupX() {
+    const x = { sort: null, used: {}, mods: {} };
+    let o = null; try { o = JSON.parse(LS.get(XKEY, 'null')); } catch (e) { o = null; }
+    if (!o || typeof o !== 'object') return x;
+    if (GSORTS.includes(o.sort)) x.sort = o.sort;
+    if (o.used && typeof o.used === 'object') Object.keys(o.used).forEach(id => { const t = o.used[id]; if (GID.test(id) && typeof t === 'string' && !isNaN(Date.parse(t))) x.used[id] = new Date(t).toISOString(); });
+    if (o.mods && typeof o.mods === 'object') Object.keys(o.mods).forEach(id => { if (GID.test(id) && Array.isArray(o.mods[id])) x.mods[id] = [...new Set(o.mods[id].filter(m => typeof m === 'string' && /^[A-Z0-9]{1,8}$/.test(m)))].slice(0, 200); });
+    return x;
+  }
   function readGroups() {
-    const g = { groups: [], sort: 'custom', collapsed: [], last: [] };
+    const X = readGroupX();
+    const g = { groups: [], sort: X.sort || 'az', collapsed: [], last: [], used: X.used };
     let o = null; try { o = JSON.parse(LS.get(GKEY, 'null')); } catch (e) { o = null; }
     if (!o || typeof o !== 'object') return g;
     const seen = new Set();
     if (Array.isArray(o.groups)) o.groups.forEach(x => {
       if (!x || typeof x.id !== 'string' || !GID.test(x.id) || seen.has(x.id) || !cleanName(x.name)) return; seen.add(x.id);
       g.groups.push({ id: x.id, name: cleanName(x.name), type: GTYPES[x.type] ? x.type : 'custom',
-        keys: Array.isArray(x.keys) ? [...new Set(x.keys.filter(k => typeof k === 'string' && /^[HI]:/.test(k)))] : [] });
+        keys: Array.isArray(x.keys) ? [...new Set(x.keys.filter(k => typeof k === 'string' && /^[HI]:/.test(k)))] : [], mods: X.mods[x.id] || [] });
     });
-    g.sort = o.sort === 'az' ? 'az' : 'custom';
+    g.sort = X.sort || (o.sort === 'az' ? 'az' : 'custom');   // a v34–v37 list keeps the order it had
     const strs = a => Array.isArray(a) ? a.filter(x => typeof x === 'string') : [];
     g.collapsed = strs(o.collapsed); g.last = strs(o.last);
     return g;
@@ -256,19 +273,33 @@
     const f = new Set(FAVS), ids = new Set(GS.groups.map(g => g.id));
     GS.groups.forEach(g => { g.keys = g.keys.filter(k => f.has(k)); });
     GS.collapsed = GS.collapsed.filter(id => id === 'ungrouped' || ids.has(id)); GS.last = GS.last.filter(id => ids.has(id));
+    Object.keys(GS.used).forEach(id => { if (!ids.has(id)) delete GS.used[id]; });
   }
   pruneGroups();
-  const saveGroups = () => { pruneGroups(); LS.set(GKEY, JSON.stringify({ v: 1, groups: GS.groups, sort: GS.sort, collapsed: GS.collapsed, last: GS.last })); };
+  const saveGroups = () => { pruneGroups();
+    LS.set(GKEY, JSON.stringify({ v: 1, groups: GS.groups.map(g => ({ id: g.id, name: g.name, type: g.type, keys: g.keys })), sort: GS.sort === 'az' ? 'az' : 'custom', collapsed: GS.collapsed, last: GS.last }));
+    const mods = {}; GS.groups.forEach(g => { if (g.mods.length) mods[g.id] = g.mods; });
+    LS.set(XKEY, JSON.stringify({ v: 1, sort: GS.sort, used: GS.used, mods })); };
   const groupById = id => GS.groups.find(g => g.id === id);
   const groupsOf = key => GS.groups.filter(g => g.keys.includes(key));
   const ungroupedKeys = () => { const inG = new Set(); GS.groups.forEach(g => g.keys.forEach(k => inG.add(k))); return FAVS.filter(k => !inG.has(k)); };
   function addToGroup(id, key) { const g = groupById(id); if (g && !g.keys.includes(key)) g.keys.unshift(key); }
   function removeFromGroup(id, key) { const g = groupById(id); if (g) g.keys = g.keys.filter(k => k !== key); }
-  const orderedGroups = () => GS.sort === 'az' ? GS.groups.slice().sort((a, b) => a.name.localeCompare(b.name, 'en-CA', { sensitivity: 'base', numeric: true }) || a.type.localeCompare(b.type)) : GS.groups.slice();
+  const byName = (a, b) => a.name.localeCompare(b.name, 'en-CA', { sensitivity: 'base', numeric: true }) || a.type.localeCompare(b.type);
+  // A–Z; Recent: last used first (never-used groups after, A–Z); custom: your own order (move up / down)
+  const orderedGroups = () => GS.sort === 'az' ? GS.groups.slice().sort(byName)
+    : GS.sort === 'recent' ? GS.groups.slice().sort((a, b) => { const ta = GS.used[a.id] || '', tb = GS.used[b.id] || ''; return (tb > ta) - (tb < ta) || byName(a, b); }) : GS.groups.slice();
+  const gTotal = g => g.keys.length + g.mods.length;
+  // mark groups as used now (opened, or one of their codes opened / picked / sent); no re-render, so nothing jumps under your finger
+  function touchGroups(ids) { const now = new Date().toISOString(); let n = 0; ids.forEach(id => { if (groupById(id)) { GS.used[id] = now; n++; } }); if (n) saveGroups(); }
+  const touchKey = key => { if (!GS.groups.length) return; const m = key[0] === 'M' ? key.slice(2) : null; touchGroups(GS.groups.filter(g => m ? g.mods.includes(m) : g.keys.includes(key)).map(g => g.id)); };
+  function addModToGroup(id, m) { const g = groupById(id); if (g && !g.mods.includes(m)) g.mods.push(m); }
+  function removeModFromGroup(id, m) { const g = groupById(id); if (g) g.mods = g.mods.filter(x => x !== m); }
+  const groupsOfMod = m => GS.groups.filter(g => g.mods.includes(m));
   const findGroup = (type, name) => GS.groups.find(g => g.type === type && g.name.toLowerCase() === cleanName(name).toLowerCase());
   function newGroup(type, name) {
     let id; do { id = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); } while (groupById(id));
-    GS.groups.push({ id, name: cleanName(name), type: GTYPES[type] ? type : 'custom', keys: [] });
+    GS.groups.push({ id, name: cleanName(name), type: GTYPES[type] ? type : 'custom', keys: [], mods: [] });
     return id;
   }
   // ---- Linked favourites (v35): a fee code linked to the ICD-9 code(s) usually billed with it, and back. Stored on this
@@ -357,7 +388,7 @@
   function addRecent(key) {
     RECENT = [key].concat(RECENT.filter(k => k !== key)).slice(0, RECENT_MAX);
     TS.r[key] = new Date().toISOString(); Object.keys(TS.r).forEach(k => { if (!RECENT.includes(k)) delete TS.r[k]; });
-    saveLists();
+    touchKey(key); saveLists();
   }
   // ---- Export / import (codes and timestamps only; nothing else leaves the device)
   const keyToItem = (k, t) => { const s = splitKey(k); return { type: s.t === 'H' ? 'HSC' : 'ICD9', code: s.code, jur: s.jur, ...(t ? { at: t } : {}) }; };
@@ -367,9 +398,11 @@
     // "favourites" and "recent", so a new file still imports there: every code arrives, just without its groups.
     // version 4 adds "links": each fee code ↔ ICD-9 pair ({hsc, icd}); older versions ignore it and import the codes.
     // version 5 adds "modLinks": each favourite's linked AHCIP modifiers ({code, modifier}); older versions ignore it.
-    const data = { app: 'MedBilling Fee Desk', kind: 'favourites', version: 5, exported: now.toISOString(),
+    // version 6 adds, per group, "mods" (explicit AHCIP modifiers in that code group) and "usedAt" (last used), and groupSort
+    // can be "recent"; older versions ignore both and read the group's fee and ICD-9 codes as before.
+    const data = { app: 'MedBilling Fee Desk', kind: 'favourites', version: 6, exported: now.toISOString(),
       favourites: FAVS.map(k => keyToItem(k, TS.f[k])), recent: RECENT.map(k => keyToItem(k, TS.r[k])),
-      groups: GS.groups.map(g => ({ name: g.name, type: g.type, codes: g.keys.map(k => keyToItem(k)) })), groupSort: GS.sort,
+      groups: GS.groups.map(g => ({ name: g.name, type: g.type, codes: g.keys.map(k => keyToItem(k)), ...(g.mods.length ? { mods: g.mods.slice() } : {}), ...(GS.used[g.id] ? { usedAt: GS.used[g.id] } : {}) })), groupSort: GS.sort,
       links: LINKS.map(([h, i]) => ({ hsc: keyToItem(h), icd: keyToItem(i) })),
       modLinks: MLINKS.map(([k, m]) => ({ code: keyToItem(k), modifier: m.slice(2) })) };
     const d = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -409,9 +442,12 @@
       return k && /^[HI]:[^|]+$/.test(k.key) && (MODX ? modOk(m) : MCODE.test(m)) ? [k.key, 'M:' + m] : null;
     }).filter(Boolean);
     // groups (version 3+): an old file has none, so its codes simply land in Ungrouped
+    // v6: a group's modifiers (explicit AHCIP modifiers from the official list) and when it was last used
+    const gmods = a => [...new Set((Array.isArray(a) ? a : []).filter(m => typeof m === 'string').map(m => m.trim().toUpperCase()).filter(m => MODX ? modOk(m) : MCODE.test(m)))].slice(0, 200);
     const groups = (Array.isArray(o.groups) ? o.groups : []).map(g => g && typeof g === 'object' && cleanName(g.name)
-      ? { name: cleanName(g.name), type: GTYPES[g.type] ? g.type : 'custom', keys: [...new Set(conv(g.codes).map(x => x.key))] } : null).filter(Boolean).slice(0, 500);
-    return { fav: conv(o.favourites), rec: conv(o.recent), groups, links, modLinks, groupSort: o.groupSort === 'az' ? 'az' : o.groupSort === 'custom' ? 'custom' : null,
+      ? { name: cleanName(g.name), type: GTYPES[g.type] ? g.type : 'custom', keys: [...new Set(conv(g.codes).map(x => x.key))], mods: gmods(g.mods),
+          usedAt: typeof g.usedAt === 'string' && !isNaN(Date.parse(g.usedAt)) ? new Date(g.usedAt).toISOString() : '' } : null).filter(Boolean).slice(0, 500);
+    return { fav: conv(o.favourites), rec: conv(o.recent), groups, links, modLinks, groupSort: GSORTS.includes(o.groupSort) ? o.groupSort : null,
       skipped: ((o.favourites || []).length + (o.recent || []).length) };
   }
   function importSaved(file) {
@@ -425,7 +461,8 @@
       let gNew = 0, gPlace = 0; const gSeen = new Set();
       p.groups.forEach(g => { const ex = findGroup(g.type, g.name), id = g.type + '|' + g.name.toLowerCase();
         if (!ex && !gSeen.has(id)) gNew++; gSeen.add(id);
-        g.keys.forEach(k => { if (willFav.has(k) && !(ex && ex.keys.includes(k))) gPlace++; }); });
+        g.keys.forEach(k => { if (willFav.has(k) && !(ex && ex.keys.includes(k))) gPlace++; });
+        g.mods.forEach(m => { if (!(ex && ex.mods.includes(m))) gPlace++; }); });
       // links: merged; a pair that would go over 3 links for either code is skipped (existing links are never removed)
       const trial = LINKS.slice(); let lNew = 0, lCap = 0;
       p.links.forEach(([h, i]) => { if (!(willFav.has(h) || willFav.has(i))) return; if (trial.some(x => x[0] === h && x[1] === i)) return;
@@ -444,7 +481,9 @@
       FAVS = FAVS.concat(newFav);
       const hadGroups = GS.groups.length > 0;
       p.groups.forEach(g => { const id = (findGroup(g.type, g.name) || {}).id || newGroup(g.type, g.name), grp = groupById(id);
-        g.keys.slice().reverse().forEach(k => { if (willFav.has(k) && !grp.keys.includes(k)) grp.keys.unshift(k); }); });
+        g.keys.slice().reverse().forEach(k => { if (willFav.has(k) && !grp.keys.includes(k)) grp.keys.unshift(k); });
+        g.mods.forEach(m => { if (!grp.mods.includes(m)) grp.mods.push(m); });
+        if (g.usedAt && !(GS.used[id] && GS.used[id] >= g.usedAt)) GS.used[id] = g.usedAt; });
       if (!hadGroups && p.groupSort) GS.sort = p.groupSort;
       if (p.groups.length) saveGroups();
       LINKS = trial; MLINKS = mtrial;
@@ -1065,6 +1104,22 @@
     $('.snb', el).onclick = () => { hide(); fn(); }; $('.snx', el).onclick = hide;
     clearTimeout(snackT); snackT = setTimeout(hide, 8000);
   }
+  // Search one kind of code by code or words (used by the link picker and, v38, by "Add codes" in a group): t = 'H' fee codes,
+  // 'I' ICD-9 / diagnostic codes, 'M' explicit AHCIP modifiers. Returns keys (hk / ik / 'M:CODE'), at most 15.
+  function searchCodes(t, v) {
+    if (t === 'M') return MODX ? modSearch(v, 'E').slice(0, 15).map(x => 'M:' + x.c) : [];
+    const cq = v.toUpperCase().replace(/\s+/g, '');
+    if (t === 'I') {
+      if (!ICD || !ICD.length) return [];
+      let cq2 = cq; if (P && /^([V\d]\d{2}|E\d{3})\d{1,2}$/.test(cq2)) cq2 = cq2.replace(/^(E\d{3}|[V\d]\d{2})/, '$1.');
+      const rows = /^(V\d{0,2}|\d{1,3}|E\d{0,3})(\.\d{0,2})?$/.test(cq2) ? ICD.filter(i => i.code.startsWith(cq2)).slice(0, 15).map(i => i.code)
+        : icdIndex.search(v, { limit: 15, boost: d => d.i.code.includes('.') ? 1.05 : 1 }).hits.map(h => h.doc.i.code);
+      return rows.map(ik);
+    }
+    const rows = (P ? P.codeRe.test(cq) : /^\d{2}\.\d{0,2}[A-Z]{0,3}$/.test(cq)) ? CODES.filter(x => x.code.startsWith(cq)).slice(0, 15).map(x => x.code)
+      : codeIndex.search(stripContext(v), { limit: 15, boost: d => (d.c.skill && d.c.skill[skill] ? 1.35 : 1) * (codeInSkill(d.c) ? 1.1 : 1) * (d.c.desc ? 1 : 0.5) }).hits.map(h => h.doc.c.code);
+    return rows.map(hk);
+  }
   // Link picker: the codes linked to one favourite (remove any), plus a search of the other kind of code (tap to link / unlink).
   // v36 (Alberta): a second tab links explicit AHCIP modifiers to the same favourite, up to 3.
   function linkSheet(key, o) {
@@ -1098,19 +1153,7 @@
         if (!isH) more = RECENT.filter(k => k[0] === 'H' && splitKey(k).jur === JUR);
         return [...new Set(mine.concat(more))].filter(k => isH ? ICDBY[splitKey(k).code] : BYCODE[splitKey(k).code]).slice(0, 12);
       };
-      const search = v => {
-        if (mode === 'mod') return modSearch(v, 'E').slice(0, 15).map(x => 'M:' + x.c);
-        const cq = v.toUpperCase().replace(/\s+/g, '');
-        if (isH) {
-          let cq2 = cq; if (P && /^([V\d]\d{2}|E\d{3})\d{1,2}$/.test(cq2)) cq2 = cq2.replace(/^(E\d{3}|[V\d]\d{2})/, '$1.');
-          const rows = /^(V\d{0,2}|\d{1,3}|E\d{0,3})(\.\d{0,2})?$/.test(cq2) ? ICD.filter(i => i.code.startsWith(cq2)).slice(0, 15).map(i => i.code)
-            : icdIndex.search(v, { limit: 15, boost: d => d.i.code.includes('.') ? 1.05 : 1 }).hits.map(h => h.doc.i.code);
-          return rows.map(ik);
-        }
-        const rows = (P ? P.codeRe.test(cq) : /^\d{2}\.\d{0,2}[A-Z]{0,3}$/.test(cq)) ? CODES.filter(x => x.code.startsWith(cq)).slice(0, 15).map(x => x.code)
-          : codeIndex.search(stripContext(v), { limit: 15, boost: d => (d.c.skill && d.c.skill[skill] ? 1.35 : 1) * (codeInSkill(d.c) ? 1.1 : 1) * (d.c.desc ? 1 : 0.5) }).hits.map(h => h.doc.c.code);
-        return rows.map(hk);
-      };
+      const search = v => searchCodes(mode === 'mod' ? 'M' : isH ? 'I' : 'H', v);
       const linked = (k) => k[0] === 'M' ? isModLinked(key, k) : isLinked(key, k);
       const paint = () => {
         const curC = canC ? linksOf(key) : [], curM = canM ? modsOf(key).filter(m => modOk(m.slice(2))) : [], cur = mode === 'mod' ? curM : curC, full = cur.length >= LMAX;
@@ -1152,24 +1195,49 @@
       });
     });
   }
+  // v38: when a group was last used, in words ("5 min ago") and as a date and time for the group sheet
+  function agoTxt(iso) {
+    if (!iso) return 'not used yet'; const m = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000));
+    if (m < 1) return 'just now'; if (m < 60) return m + ' min ago'; const h = Math.round(m / 60); if (h < 24) return h + ' h ago';
+    const d = Math.round(h / 24); return d < 7 ? d + ' d ago' : new Date(iso).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
+  }
+  const whenTxt = iso => iso ? new Date(iso).toLocaleString('en-CA', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) + ` (${agoTxt(iso)})` : 'not yet';
+  const modsShown = () => JUR === 'AB' && !!MODX;
+  const modText = m => ('modifier ' + m + ' ' + (MODXBY[m] ? MODXBY[m].n + ' ' + MODXBY[m].t : '')).toLowerCase();
+  // codes of a group that can go to MedBilling Logs in one send (this jurisdiction; modifiers: explicit only)
+  function groupSendable(g) {
+    const of = t => g.keys.filter(k => k[0] === t && splitKey(k).jur === JUR).map(k => splitKey(k).code).filter(c => t === 'H' ? BYCODE[c] : ICDBY[c]);
+    return { H: of('H'), I: of('I'), M: modsShown() ? g.mods.filter(modOk) : [] };
+  }
+  const nSendable = g => { const x = groupSendable(g); return x.H.length + x.I.length + x.M.length; };
+  // one modifier inside a code group: code, name, "Modifier", [＋ in multi-pick], ⋯ (groups / remove)
+  function savedModRow(m, gid) {
+    const o = MODXBY[m]; if (!o) return '';
+    return `<button class="hit compact gmod" data-gmod="${esc(m)}" data-g="${esc(gid)}" title="${esc('Modifier ' + m + ': ' + modNice(o.n))}"><span class="ccode code">${esc(m)}</span><span class="cdesc">${esc(modNice(o.n))}</span><span class="small muted">Modifier</span>${pselBtn('M', m)}<span class="gsp" aria-hidden="true"></span><span class="rowmenu" role="button" tabindex="0" data-gmodmenu="${esc(m)}" data-g="${esc(gid)}" aria-label="Groups and options for modifier ${esc(m)}" title="Groups and options">⋯</span></button>`;
+  }
   function groupsHtml() {
-    const q = favFilter.trim().toLowerCase();
-    const secs = orderedGroups().map(g => ({ id: g.id, name: g.name, type: g.type, keys: g.keys }));
-    const ug = ungroupedKeys(); if (ug.length) secs.push({ id: 'ungrouped', name: 'Ungrouped', type: null, keys: ug });
+    const q = favFilter.trim().toLowerCase(), showM = modsShown();
+    const secs = orderedGroups().map(g => ({ id: g.id, name: g.name, type: g.type, keys: g.keys, mods: g.mods, g }));
+    const ug = ungroupedKeys(); if (ug.length) secs.push({ id: 'ungrouped', name: 'Ungrouped', type: null, keys: ug, mods: [] });
     let shown = 0;
     const html = secs.map(g => {
       const nameHit = q && g.type && g.name.toLowerCase().includes(q);
-      const keys = !q || nameHit ? g.keys : g.keys.filter(k => favText(k).includes(q));
-      if (q && !keys.length) return '';
+      const keys0 = !q || nameHit ? g.keys : g.keys.filter(k => favText(k).includes(q));
+      const keys = keys0.filter(k => k[0] === 'H').concat(keys0.filter(k => k[0] !== 'H'));   // v38: fee codes, then ICD-9, then modifiers
+      const allM = showM ? g.mods.filter(m => MODXBY[m]) : [], mods = !q || nameHit ? allM : allM.filter(m => modText(m).includes(q));
+      if (q && !keys.length && !mods.length) return '';
       shown++;
       const open = q ? true : !GS.collapsed.includes(g.id);
       const rowList = keys.map(k => savedRow(k, g.id)).filter(Boolean), held = keys.filter(k => heldJur(splitKey(k).jur)).length;
-      const n = rowList.length + held, total = q ? g.keys.filter(k => heldJur(splitKey(k).jur) || savedRow(k)).length : n;
-      const rows = rowList.join('') + heldSavedRows(keys);
-      const empty = g.type ? `<p class="muted small fgempty">No codes yet. Tap ☆ on any code, or <button type="button" class="linkbtn" data-fgadd="${esc(g.id)}">add favourites</button>.</p>` : '';
+      const n = rowList.length + held + mods.length, total = q ? g.keys.filter(k => heldJur(splitKey(k).jur) || savedRow(k)).length + allM.length : n;
+      const hiddenM = !showM && g.mods.length ? `<p class="muted small fgempty">${g.mods.length} Alberta modifier${g.mods.length === 1 ? '' : 's'} in this group show${g.mods.length === 1 ? 's' : ''} when Alberta is selected.</p>` : '';
+      const rows = rowList.join('') + mods.map(m => savedModRow(m, g.id)).join('') + heldSavedRows(keys) + (rowList.length || held || mods.length ? hiddenM : '');
+      const empty = g.type ? (hiddenM || `<p class="muted small fgempty">No codes yet. <button type="button" class="linkbtn" data-fgadd="${esc(g.id)}">Add codes</button> (fee codes, ${JUR === 'AB' ? 'ICD-9 codes and modifiers' : 'diagnostic codes'}), or tap ☆ on any code.</p>`) : '';
+      const when = g.type && GS.sort === 'recent' ? `<span class="fgwhen" title="Last used">${esc(agoTxt(GS.used[g.id]))}</span>` : '';
+      const send = g.type && pickMulti() && nSendable(g.g) ? `<button type="button" class="fgsend" data-fgsend="${esc(g.id)}" aria-label="Send group ${esc(g.name)} to MedBilling Logs" title="Send this group's codes to MedBilling Logs">Send</button>` : '';
       return `<section class="favgrp${g.type ? '' : ' ungrouped'}" data-gid="${esc(g.id)}"><div class="fgh">
-        <button type="button" class="fgtoggle" data-fgtoggle="${esc(g.id)}" aria-expanded="${open}" aria-controls="fgb-${esc(g.id)}"><span class="fgchev" aria-hidden="true">${open ? '▾' : '▸'}</span><span class="fgic">${ICONS[g.type || 'ungrouped']}</span><span class="fgname">${esc(g.name)}</span>${g.type ? typeTag(g.type) : ''}<span class="fgcount" aria-label="${n} code${n === 1 ? '' : 's'}">${q && n !== total ? n + '/' + total : n}</span></button>
-        ${g.type ? `<button type="button" class="fgmenu" data-fgmenu="${esc(g.id)}" aria-label="Options for group ${esc(g.name)}" title="Rename, reorder or delete">⋯</button>` : ''}</div>
+        <button type="button" class="fgtoggle" data-fgtoggle="${esc(g.id)}" aria-expanded="${open}" aria-controls="fgb-${esc(g.id)}"${g.type ? ` title="Last used: ${esc(whenTxt(GS.used[g.id]))}"` : ''}><span class="fgchev" aria-hidden="true">${open ? '▾' : '▸'}</span><span class="fgic">${ICONS[g.type || 'ungrouped']}</span><span class="fgname">${esc(g.name)}</span>${g.type ? typeTag(g.type) : ''}${when}<span class="fgcount" aria-label="${n} code${n === 1 ? '' : 's'}">${q && n !== total ? n + '/' + total : n}</span></button>
+        ${send}${g.type ? `<button type="button" class="fgmenu" data-fgmenu="${esc(g.id)}" aria-label="Options for group ${esc(g.name)}" title="Add codes, rename, reorder or delete">⋯</button>` : ''}</div>
         <div class="fgbody" id="fgb-${esc(g.id)}"${open ? '' : ' hidden'}>${rows || empty}</div></section>`;
     }).join('');
     return shown ? html : `<p class="muted small pad savedempty">No favourites match “${esc(favFilter.trim())}”.</p>`;
@@ -1179,9 +1247,9 @@
     const grouped = GS.groups.length > 0;
     const fav = grouped ? '' : FAVS.map(k => savedRow(k, '', true)).filter(Boolean).join('') + heldSavedRows(FAVS), rec = RECENT.map(k => savedRow(k)).filter(Boolean).join('') + heldSavedRows(RECENT);
     const sk = esc(skill === 'BASE' ? 'base' : skill);
-    const tools = (FAVS.length >= 2 || grouped) ? `<div class="favtools"><div class="inputwrap fgq"><input id="favq" type="search" enterkeyhint="search" autocapitalize="off" spellcheck="false" placeholder="Filter favourites" aria-label="Filter favourites" value="${esc(favFilter)}"></div>${GS.groups.length >= 2 ? `<label class="fgsort"><span>Groups</span><select id="favSort" aria-label="Order of groups"><option value="custom"${GS.sort === 'custom' ? ' selected' : ''}>Custom order</option><option value="az"${GS.sort === 'az' ? ' selected' : ''}>A–Z</option></select></label>` : ''}</div>` : '';
+    const tools = (FAVS.length >= 2 || grouped) ? `<div class="favtools"><div class="inputwrap fgq"><input id="favq" type="search" enterkeyhint="search" autocapitalize="off" spellcheck="false" placeholder="Filter favourites" aria-label="Filter favourites" value="${esc(favFilter)}"></div>${GS.groups.length >= 2 ? `<div class="fgsort" role="radiogroup" aria-label="Sort groups"><span>Sort</span>${[['az', 'A–Z', 'Alphabetical'], ['recent', 'Recent', 'Most recently used first'], ['custom', 'My order', 'Your own order (Move up / down)']].map(([v, l, t]) => `<button type="button" role="radio" class="fgsortb" data-gsort="${v}" aria-checked="${GS.sort === v}" title="${t}">${l}</button>`).join('')}</div>` : ''}</div>` : '';
     const favBody = grouped ? `<div id="favgroups" class="favgroups">${groupsHtml()}</div>` : (fav || '<p class="muted small pad savedempty">Tap ☆ on any code to keep it here.</p>');
-    const hint = !grouped && FAVS.length >= 3 ? '<p class="muted small fghint">Long list? Group favourites by specialty, doctor or your own name with <b>+ New group</b>.</p>' : '';
+    const hint = !grouped && FAVS.length >= 3 ? '<p class="muted small fghint">Bill some codes together? Make a named group (e.g. C-section) with <b>+ New group</b>. Groups can also sort favourites by specialty or doctor.</p>' : '';
     box.innerHTML = (JINFO && JINFO.status !== 'live' ? soonPanel() : '') + `<div class="savedh" id="savedFav"><h3>★ Favourites</h3><button type="button" class="fgnew" id="favNewGrp" aria-label="New favourites group">+ New group</button></div>${tools}${hint}${favBody}
       <div class="savedh" id="savedRecent"><h3>Recent</h3>${rec ? '<button type="button" class="linkbtn" id="clearRecent">Clear</button>' : ''}</div>${rec || '<p class="muted small pad savedempty">Codes you open appear here (last ' + RECENT_MAX + ').</p>'}
       <div class="savedtools">
@@ -1205,7 +1273,9 @@
   }
   function toggleGroup(id) {
     const open = GS.collapsed.includes(id);   // was collapsed -> open it
-    GS.collapsed = open ? GS.collapsed.filter(x => x !== id) : GS.collapsed.concat(id); saveGroups();
+    GS.collapsed = open ? GS.collapsed.filter(x => x !== id) : GS.collapsed.concat(id);
+    if (open && groupById(id)) GS.used[id] = new Date().toISOString();   // v38: opening a group counts as using it
+    saveGroups();
     const sec = $(`#results .favgrp[data-gid="${id}"]`); if (!sec || favFilter.trim()) return;
     const b = $('.fgtoggle', sec); b.setAttribute('aria-expanded', String(open)); $('.fgchev', b).textContent = open ? '▾' : '▸'; $('.fgbody', sec).hidden = !open;
   }
@@ -1239,7 +1309,7 @@
     else { const j = JREG.find(x => x.id === sk.jur); d = (sk.t === 'H' ? 'Fee code' : 'Diagnostic code') + ' saved under ' + (j ? jn(j) : sk.jur); }
     return `<p class="fgcode"><span class="code">${esc(sk.code)}</span> <span class="muted">${esc(d)}</span></p>`;
   }
-  const groupOpt = (g, checked) => `<label class="fgopt"><input type="checkbox" data-gid="${esc(g.id)}"${checked ? ' checked' : ''}><span class="fgic">${ICONS[g.type]}</span><span class="fgname">${esc(g.name)}</span>${typeTag(g.type)}<span class="fgcount">${g.keys.length}</span></label>`;
+  const groupOpt = (g, checked) => `<label class="fgopt"><input type="checkbox" data-gid="${esc(g.id)}"${checked ? ' checked' : ''}><span class="fgic">${ICONS[g.type]}</span><span class="fgname">${esc(g.name)}</span>${typeTag(g.type)}<span class="fgcount">${gTotal(g)}</span></label>`;
   // Groups for one code: tick any number of groups (copy), untick to remove, "Move from <group> to" (move), or remove the star.
   // fresh: just starred; ticking here also becomes the default for the next star ("last used").
   function codeSheet(key, o) {
@@ -1253,13 +1323,13 @@
         ${can ? `<button type="button" class="ghost lkedit" data-linkedit>${lk.length ? 'Edit links…' : 'Link ' + esc(partnerShort(key)) + '…'}</button>` : ''}</div>` : '';
       return codeLabel(key) + lsec + (gs.length ? `<p class="fgsub">Groups</p>` : '') +
         (gs.length ? `<p class="small muted fgnote">${o.fresh ? 'Choose the group(s) for this code. A code can be in several groups; none ticked = Ungrouped.' : 'Tick the groups this code belongs to. A code can be in several groups; none ticked = Ungrouped.'}</p>
-        <div class="fgopts" role="group" aria-label="Groups">${gs.map(g => groupOpt(g, mine.has(g.id))).join('')}</div>` : `<p class="small muted fgnote">No groups yet. Use <b>+ New group</b> to sort favourites into folders by specialty, doctor or your own name.</p>`) + `
+        <div class="fgopts" role="group" aria-label="Groups">${gs.map(g => groupOpt(g, mine.has(g.id))).join('')}</div>` : `<p class="small muted fgnote">No groups yet. Use <b>+ New group</b> to make a named group of codes you bill together (e.g. C-section), or to sort favourites by specialty or doctor.</p>`) + `
         ${from && gs.length > 1 ? `<p class="fgsub">Move from ${esc(from.name)} to</p><div class="fgmove">${gs.filter(g => g.id !== from.id).map(g => `<button type="button" class="chip" data-moveto="${esc(g.id)}">${esc(g.name)}</button>`).join('')}</div>` : ''}
         <div class="fgacts"><button type="button" class="ghost" data-newgrp>+ New group</button>${from ? `<button type="button" class="ghost" data-rmfrom>Remove from ${esc(from.name)}</button>` : ''}${o.fresh ? '' : '<button type="button" class="ghost danger" data-unfav>Remove from favourites</button>'}<button type="button" class="primary" data-close>Done</button></div>`;
     };
     const changed = () => { if (o.fresh) GS.last = groupsOf(key).map(g => g.id); saveGroups(); refreshSaved(); };
     const wireIt = el => {
-      el.addEventListener('change', e => { const c = e.target.closest('input[data-gid]'); if (!c) return; if (c.checked) addToGroup(c.dataset.gid, key); else removeFromGroup(c.dataset.gid, key); changed(); $$('.fgopt', el).forEach(l => { const g = groupById($('input', l).dataset.gid); $('.fgcount', l).textContent = g ? g.keys.length : 0; }); });
+      el.addEventListener('change', e => { const c = e.target.closest('input[data-gid]'); if (!c) return; if (c.checked) addToGroup(c.dataset.gid, key); else removeFromGroup(c.dataset.gid, key); changed(); $$('.fgopt', el).forEach(l => { const g = groupById($('input', l).dataset.gid); $('.fgcount', l).textContent = g ? gTotal(g) : 0; }); });
       el.addEventListener('click', e => {
         const mv = e.target.closest('[data-moveto]');
         if (mv) { const to = groupById(mv.dataset.moveto); removeFromGroup(from.id, key); addToGroup(to.id, key); changed(); closeSheet(); toast(`${code} moved to ${to.name}`); return; }
@@ -1271,19 +1341,20 @@
     };
     openSheet('fgCodeSheet', o.fresh ? '★ Added to favourites' : (GS.groups.length ? 'Links and groups for ' : 'Options for ') + esc(code), body(), wireIt);
   }
-  // Create or edit a group: type (Specialty / Doctor / Custom) and name
+  // Create or edit a group: type (Custom / Specialty / Doctor) and name. v38: Custom (a named set of codes) comes first and is the default.
   function groupEditor(gid, then) {
-    const g = gid ? groupById(gid) : null; let type = g ? g.type : 'specialty';
-    const ph = { specialty: 'Specialty, e.g. Family Medicine', doctor: "Doctor's name, e.g. Dr. A. Patel", custom: 'Any name, e.g. Tuesday clinic' };
-    const help = { specialty: 'Pick one below or type your own.', doctor: 'Your own label for a doctor you bill for. Kept on this device only.', custom: 'Any name that helps you find these codes.' };
-    const body = `<div class="fgseg" role="radiogroup" aria-label="Group type">${Object.keys(GTYPES).map(t => `<button type="button" role="radio" class="fgsegb t-${t}" data-type="${t}" aria-checked="${t === type}">${ICONS[t]}<span>${GTYPES[t]}</span></button>`).join('')}</div>
+    const g = gid ? groupById(gid) : null; let type = g ? g.type : 'custom';
+    const ph = { specialty: 'Specialty, e.g. Family Medicine', doctor: "Doctor's name, e.g. Dr. A. Patel", custom: 'Any name, e.g. C-section, Clinic visit' };
+    const help = { specialty: 'Pick one below or type your own.', doctor: 'Your own label for a doctor you bill for. Kept on this device only.',
+      custom: `A named set of codes you bill together. It can hold fee codes, ${JUR === 'AB' ? 'ICD-9 codes and modifiers' : 'diagnostic codes'}.` };
+    const body = `<div class="fgseg" role="radiogroup" aria-label="Group type">${['custom', 'specialty', 'doctor'].map(t => `<button type="button" role="radio" class="fgsegb t-${t}" data-type="${t}" aria-checked="${t === type}">${ICONS[t]}<span>${GTYPES[t]}</span></button>`).join('')}</div>
       <label class="fglab" for="fgName">Name</label><input id="fgName" class="fginput" type="text" maxlength="60" autocomplete="off" autocapitalize="words" spellcheck="false" list="fgSpecList" value="${g ? esc(g.name) : ''}">
       <datalist id="fgSpecList">${SPECIALTIES.map(x => `<option value="${esc(x)}">`).join('')}</datalist>
       <p class="small muted fghelp" id="fgHelp"></p>
       <div class="fgspecs" id="fgSpecs" role="group" aria-label="Common specialties">${SPECIALTIES.map(x => `<button type="button" class="chip" data-spec="${esc(x)}">${esc(x)}</button>`).join('')}</div>
       <p class="fgerr" id="fgErr" role="alert" hidden></p>
       <div class="fgacts"><button type="button" class="ghost" data-close>Cancel</button><button type="button" class="primary" id="fgSave">${g ? 'Save' : 'Create group'}</button></div>`;
-    openSheet('fgEditor', g ? 'Edit group' : 'New favourites group', body, el => {
+    openSheet('fgEditor', g ? 'Edit group' : 'New group', body, el => {
       const inp = $('#fgName', el), err = $('#fgErr', el);
       const paint = () => { $$('.fgsegb', el).forEach(b => b.setAttribute('aria-checked', String(b.dataset.type === type))); inp.placeholder = ph[type]; $('#fgHelp', el).textContent = help[type];
         $('#fgSpecs', el).hidden = type !== 'specialty'; if (type === 'specialty') inp.setAttribute('list', 'fgSpecList'); else inp.removeAttribute('list');
@@ -1306,20 +1377,29 @@
     });
     if (!g) setTimeout(() => { try { $('#fgName').focus(); } catch (e) {} }, 60);
   }
-  // Group options: add favourites, rename/change type, move up/down (custom order), delete
+  // what a group holds, in words: "2 fee codes · 1 ICD-9 code · 2 modifiers"
+  function groupCountTxt(g) {
+    const h = g.keys.filter(k => k[0] === 'H').length, i = g.keys.length - h, m = g.mods.length, dx = JUR === 'AB' ? 'ICD-9 code' : 'diagnostic code';
+    const parts = [h ? `${h} fee code${h === 1 ? '' : 's'}` : '', i ? `${i} ${dx}${i === 1 ? '' : 's'}` : '', m ? `${m} modifier${m === 1 ? '' : 's'}` : ''].filter(Boolean);
+    return parts.length ? parts.join(' · ') : 'No codes yet';
+  }
+  // Group options: send (multi-code pick), add or remove codes, rename/change type, move up/down (your own order), delete
   function groupSheet(gid) {
     const g = groupById(gid); if (!g) return;
     const ord = orderedGroups(), i = ord.indexOf(g);
-    const body = `<p class="fgcode">${typeTag(g.type)} <span class="muted">${g.keys.length} code${g.keys.length === 1 ? '' : 's'}</span></p>
+    const body = `<p class="fgcode">${typeTag(g.type)} <span class="muted">${esc(groupCountTxt(g))}</span></p>
+      <p class="small muted fgused">Last used: ${esc(whenTxt(GS.used[gid]))}</p>
       <div class="fglist">
-        <button type="button" class="fgitem" data-act="add">Add favourites to this group…</button>
+        ${pickMulti() && nSendable(g) ? '<button type="button" class="fgitem" data-act="send">Send this group to MedBilling Logs…</button>' : ''}
+        <button type="button" class="fgitem" data-act="add">Add or remove codes…<span class="small muted">Fee codes, ${JUR === 'AB' ? 'ICD-9 codes and modifiers' : 'diagnostic codes'}</span></button>
         <button type="button" class="fgitem" data-act="edit">Rename or change type…</button>
         <button type="button" class="fgitem" data-act="up"${i <= 0 ? ' disabled' : ''}>Move up</button>
         <button type="button" class="fgitem" data-act="down"${i >= ord.length - 1 ? ' disabled' : ''}>Move down</button>
         <button type="button" class="fgitem danger" data-act="del">Delete group…</button>
-      </div>${GS.sort === 'az' && ord.length > 1 ? '<p class="small muted fgnote">Groups are sorted A–Z. Moving a group switches to Custom order.</p>' : ''}`;
+      </div>${GS.sort !== 'custom' && ord.length > 1 ? `<p class="small muted fgnote">Groups are sorted ${GS.sort === 'az' ? 'A–Z' : 'by most recently used'}. Moving a group switches to My order.</p>` : ''}`;
     openSheet('fgGroupSheet', esc(g.name), body, el => el.addEventListener('click', e => {
       const b = e.target.closest('[data-act]'); if (!b || b.disabled) return; const a = b.dataset.act;
+      if (a === 'send') return groupSendSheet(gid);
       if (a === 'add') return groupPicker(gid);
       if (a === 'edit') return groupEditor(gid);
       if (a === 'del') return deleteSheet(gid);
@@ -1329,10 +1409,10 @@
     }));
   }
   function deleteSheet(gid) {
-    const g = groupById(gid); if (!g) return; const n = g.keys.length;
+    const g = groupById(gid); if (!g) return; const n = gTotal(g), nm = g.mods.length;
     const only = g.keys.filter(k => groupsOf(k).length === 1).length;
-    const body = `<p>Delete the group <b>${esc(g.name)}</b>?${n ? ` It has ${n} code${n === 1 ? '' : 's'}.` : ''}</p>
-      <div class="fglist">${n ? `<button type="button" class="fgitem" data-del="keep">Delete group, keep its codes<span class="small muted">Codes stay in your favourites${only ? ` (${only} move to Ungrouped)` : ''}.</span></button>
+    const body = `<p>Delete the group <b>${esc(g.name)}</b>?${n ? ` It has ${esc(groupCountTxt(g))}.` : ''}</p>
+      <div class="fglist">${n ? `<button type="button" class="fgitem" data-del="keep">Delete group, keep its codes<span class="small muted">Fee and ${JUR === 'AB' ? 'ICD-9' : 'diagnostic'} codes stay in your favourites${only ? ` (${only} move to Ungrouped)` : ''}.${nm ? ' Its modifiers leave with the group.' : ''}</span></button>
         <button type="button" class="fgitem danger" data-del="remove">Delete group and its codes<span class="small muted">Removes them from your favourites. Codes that are also in another group stay there.</span></button>`
         : '<button type="button" class="fgitem danger" data-del="keep">Delete group</button>'}
         <button type="button" class="fgitem" data-close>Cancel</button></div>`;
@@ -1345,18 +1425,131 @@
       toast(`Group “${g.name}” deleted` + (removed ? `, ${removed} code${removed === 1 ? '' : 's'} removed` : ''));
     }));
   }
-  // Tick favourites to put them in a group (handy for sorting an existing list)
-  function groupPicker(gid) {
+  // Add or remove a group's codes. v38: tabs Favourites (tick favourites, as in v34) · Fee codes · ICD-9 · Modifiers (Alberta):
+  // search any code by code or words and tap to add / take out. A fee or ICD-9 code added here is also starred (groups live in
+  // Favourites); taking it out of the group keeps the star. Modifiers live only in their groups.
+  function groupPicker(gid, mode0) {
     const g = groupById(gid); if (!g) return;
-    const keys = FAVS.filter(k => !heldJur(splitKey(k).jur));
+    const canI = !!(ICD && ICD.length), canM = modsShown(), dxShort = JUR === 'AB' ? 'ICD-9' : P && P.meta.dx ? P.meta.dx.system : 'Dx';
+    const favKeys = () => FAVS.filter(k => !heldJur(splitKey(k).jur));
+    const modes = [['fav', 'Favourites'], ['H', 'Fee codes']].concat(canI ? [['I', dxShort]] : [], canM ? [['M', 'Modifiers']] : []);
+    let mode = modes.some(m => m[0] === mode0) ? mode0 : favKeys().length ? 'fav' : 'H', q = '';
     const row = k => { const t = codeLabel(k).replace(/<\/?p[^>]*>/g, '');
       return `<label class="fgopt fgpick" data-t="${esc(favText(k))}"><input type="checkbox" data-key="${esc(k)}"${g.keys.includes(k) ? ' checked' : ''}><span class="fgpl">${t}</span></label>`; };
-    const body = keys.length ? `<div class="inputwrap fgq"><input id="fgPickQ" type="search" placeholder="Filter favourites" aria-label="Filter favourites" autocapitalize="off" spellcheck="false"></div>
-      <div class="fgopts fgpicks">${keys.map(row).join('')}</div><div class="fgacts"><button type="button" class="primary" data-close>Done</button></div>`
-      : '<p class="muted">No favourites yet. Tap ☆ on any code, then come back here.</p><div class="fgacts"><button type="button" class="primary" data-close>OK</button></div>';
+    const favHtml = () => { const ks = favKeys(); return ks.length ? `<div class="inputwrap fgq"><input id="fgPickQ" type="search" placeholder="Filter favourites" aria-label="Filter favourites" autocapitalize="off" spellcheck="false"></div>
+      <div class="fgopts fgpicks">${ks.map(row).join('')}</div>` : `<p class="muted small lknone">No favourites yet. Use the Fee codes${canI ? ', ' + esc(dxShort) : ''}${canM ? ' or Modifiers' : ''} tab to find codes.</p>`; };
+    const body = `<p class="fgcode">${typeTag(g.type)} <span class="muted" id="fgAddN"></span></p>
+      ${modes.length > 1 ? `<div class="lkseg fgaddseg n${modes.length}" role="tablist" aria-label="Find codes">${modes.map(([m, l]) => `<button type="button" role="tab" data-gmode="${m}">${esc(l)}</button>`).join('')}</div>` : ''}
+      <p class="small muted fgnote" id="fgAddNote"></p>
+      <div id="fgModeFav"></div>
+      <div id="fgModeSearch" hidden><div class="inputwrap fgq"><input id="fgAddQ" type="search" enterkeyhint="search" autocapitalize="off" spellcheck="false"></div>
+        <p class="fgsub" id="fgAddResH"></p><div class="fgopts lkres" id="fgAddRes" role="group" aria-labelledby="fgAddResH"></div></div>
+      <div class="fgacts"><button type="button" class="primary" data-close>Done</button></div>`;
     openSheet('fgPicker', 'Add to ' + esc(g.name), body, el => {
-      el.addEventListener('change', e => { const c = e.target.closest('input[data-key]'); if (!c) return; if (c.checked) addToGroup(gid, c.dataset.key); else removeFromGroup(gid, c.dataset.key); saveGroups(); refreshSaved(); });
-      const q = $('#fgPickQ', el); if (q) q.addEventListener('input', () => { const v = q.value.trim().toLowerCase(); $$('.fgpick', el).forEach(l => { l.hidden = !!v && !l.dataset.t.includes(v); }); });
+      const inp = $('#fgAddQ', el);
+      const inGroup = k => k[0] === 'M' ? g.mods.includes(k.slice(2)) : g.keys.includes(k);
+      const suggestions = () => {   // the group's own codes of that kind first, then your favourites / recent / codes listed with its fee codes
+        const fees = g.keys.filter(k => k[0] === 'H' && splitKey(k).jur === JUR).map(k => splitKey(k).code).filter(c => BYCODE[c]);
+        if (mode === 'M') { const seen = new Set(g.mods.filter(modOk)); fees.forEach(h => ((BYCODE[h] || {}).mods || []).forEach(m => { if (m[2] && modOk(m[1])) seen.add(m[1]); }));
+          fees.forEach(h => modsOf(hk(h)).forEach(m => { if (modOk(m.slice(2))) seen.add(m.slice(2)); })); return [...seen].slice(0, 20).map(x => 'M:' + x); }
+        const own = g.keys.filter(k => k[0] === mode && splitKey(k).jur === JUR), fav = FAVS.filter(k => k[0] === mode && splitKey(k).jur === JUR);
+        let more = mode === 'H' ? RECENT.filter(k => k[0] === 'H' && splitKey(k).jur === JUR) : [];
+        if (mode === 'I') { fees.forEach(h => linksOf(hk(h)).forEach(k => more.push(k))); fees.slice(0, 3).forEach(h => { try { more = more.concat(suggestIcd(BYCODE[h]).rows.slice(0, 6).map(r => ik(r.i.code))); } catch (e) {} }); }
+        return [...new Set(own.concat(fav, more))].filter(k => mode === 'H' ? BYCODE[splitKey(k).code] : ICDBY[splitKey(k).code]).slice(0, 20);
+      };
+      const paint = () => {
+        $('#fgAddN', el).textContent = groupCountTxt(g);
+        $$('[data-gmode]', el).forEach(b => { const on = b.dataset.gmode === mode; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); });
+        $('#fgAddNote', el).textContent = mode === 'fav' ? 'Tick favourites to put them in this group; untick to take them out. A code can be in several groups.'
+          : mode === 'M' ? 'Explicit AHCIP modifiers (official SOMB list). Tap to add to this group or take out.'
+          : `Search by code or words. Tap to add to this group or take out. A code you add is also starred in Favourites.`;
+        $('#fgModeFav', el).hidden = mode !== 'fav'; $('#fgModeSearch', el).hidden = mode === 'fav';
+        if (mode === 'fav') return;
+        inp.placeholder = mode === 'M' ? 'Search modifiers (e.g. CMGP, evening)' : mode === 'I' ? `Search ${dxShort} by code or words` : 'Search fee codes by code or words';
+        inp.setAttribute('aria-label', mode === 'M' ? 'Search modifiers' : mode === 'I' ? `Search ${dxShort} codes` : 'Search fee codes');
+        const list = q ? searchCodes(mode, q) : suggestions();
+        $('#fgAddResH', el).textContent = q ? (list.length ? 'Results' : '') : (list.length ? 'In this group, your favourites and suggestions' : '');
+        $('#fgAddRes', el).innerHTML = list.length ? list.map(k => { const on = inGroup(k), cd = linkCodeTxt(k);
+          return `<button type="button" class="lkopt k-${k[0]}" data-gadd="${esc(k)}" aria-pressed="${on}" title="${esc(cd + ' ' + shortDesc(k))}"><span class="code">${esc(cd)}</span><span class="lkd">${esc(shortDesc(k, true))}</span><span class="lkst">${on ? '✓ In group' : '+ Add'}</span></button>`; }).join('')
+          : `<p class="muted small lknone">${q ? 'No matching codes.' : mode === 'M' ? 'Type a modifier code or a few words above (e.g. CMGP, evening, complex).' : 'Type a code or a few words above.'}</p>`;
+        $('#fgAddRes', el).classList.toggle('empty', !list.length);
+      };
+      const favSec = () => { $('#fgModeFav', el).innerHTML = favHtml(); const fq = $('#fgPickQ', el); if (fq) fq.addEventListener('input', () => { const v = fq.value.trim().toLowerCase(); $$('.fgpick', el).forEach(l => { l.hidden = !!v && !l.dataset.t.includes(v); }); }); };
+      favSec(); paint();
+      el.addEventListener('change', e => { const c = e.target.closest('input[data-key]'); if (!c) return; if (c.checked) addToGroup(gid, c.dataset.key); else removeFromGroup(gid, c.dataset.key); saveGroups(); refreshSaved(); $('#fgAddN', el).textContent = groupCountTxt(g); });
+      inp.addEventListener('input', () => { q = inp.value.trim(); paint(); });
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); inp.blur(); } });
+      el.addEventListener('click', e => {
+        const md = e.target.closest('[data-gmode]');
+        if (md) { mode = md.dataset.gmode; q = ''; inp.value = ''; if (mode === 'fav') favSec(); paint(); if (mode !== 'fav') inp.focus({ preventScroll: true }); return; }
+        const op = e.target.closest('[data-gadd]'); if (!op) return;
+        const k = op.dataset.gadd, c = splitKey(k).code;
+        if (inGroup(k)) { if (k[0] === 'M') removeModFromGroup(gid, c); else removeFromGroup(gid, k); toast(`${k[0] === 'M' ? 'Modifier ' : ''}${c} taken out of ${g.name}`); }
+        else {
+          if (k[0] === 'M') addModToGroup(gid, c);
+          else { if (!isFav(k)) { FAVS = [k].concat(FAVS); TS.f[k] = new Date().toISOString(); persistStorage(); } addToGroup(gid, k); }
+          toast(`${k[0] === 'M' ? 'Modifier ' : ''}${c} added to ${g.name}`);
+        }
+        saveLists(); saveGroups(); $$('[data-fav]').forEach(paintStar); refreshSaved(); paint();
+        const again = $(`#fgAddRes [data-gadd="${CSS.escape(k)}"]`, el); if (again) again.focus({ preventScroll: true });
+      });
+    });
+  }
+  // A modifier and its code groups (⋯ on a modifier in a group, or "Add to group" on the Modifiers tab): tick / untick groups
+  function modGroupSheet(m, o) {
+    o = o || {}; const from = o.from ? groupById(o.from) : null, x = MODXBY[m]; if (!x) return;
+    const body = () => { const gs = orderedGroups(), mine = new Set(groupsOfMod(m).map(g => g.id));
+      return `<p class="fgcode"><span class="code">${esc(m)}</span> <span class="muted">${esc(modNice(x.n))}</span></p>` +
+        (gs.length ? `<p class="fgsub">Groups</p><p class="small muted fgnote">Tick the code groups this modifier belongs to (e.g. with the fee and ICD-9 codes you bill it with).</p>
+        <div class="fgopts" role="group" aria-label="Groups">${gs.map(g => groupOpt(g, mine.has(g.id))).join('')}</div>`
+          : '<p class="small muted fgnote">No groups yet. Make a named group (e.g. C-section) to keep this modifier with the fee and ICD-9 codes you bill it with.</p>') +
+        `<div class="fgacts"><button type="button" class="ghost" data-newgrp>+ New group</button>${from ? `<button type="button" class="ghost" data-rmfrom>Remove from ${esc(from.name)}</button>` : ''}<button type="button" class="primary" data-close>Done</button></div>`; };
+    openSheet('fgModSheet', 'Modifier ' + esc(m) + ' in groups', body(), el => {
+      el.addEventListener('change', e => { const c = e.target.closest('input[data-gid]'); if (!c) return; if (c.checked) addModToGroup(c.dataset.gid, m); else removeModFromGroup(c.dataset.gid, m); saveGroups(); refreshSaved();
+        $$('.fgopt', el).forEach(l => { const g = groupById($('input', l).dataset.gid); $('.fgcount', l).textContent = g ? gTotal(g) : 0; }); paintModGrp(m); toast(`Modifier ${m} ${c.checked ? 'added to' : 'taken out of'} ${(groupById(c.dataset.gid) || {}).name}`); });
+      el.addEventListener('click', e => {
+        if (e.target.closest('[data-rmfrom]')) { removeModFromGroup(from.id, m); saveGroups(); refreshSaved(); paintModGrp(m); closeSheet(); toast(`Modifier ${m} removed from ${from.name}`); return; }
+        if (e.target.closest('[data-newgrp]')) groupEditor(null, id => { addModToGroup(id, m); saveGroups(); refreshSaved(); paintModGrp(m); modGroupSheet(m, o); });
+      });
+    });
+  }
+  const paintModGrp = m => { const b = $(`#modifiers [data-modgrp="${CSS.escape(m)}"]`); if (b) b.textContent = groupsOfMod(m).length ? '✓ In group' : '+ Group'; };
+  // v38, multi-code pick (MedBilling Logs pv=2, Alberta): send a whole group, or the codes you leave ticked, in one go. Up to
+  // tmax() per kind (10 with Logs v9m+, else 3); more than that: the first ones are ticked and the cap stops further ticks.
+  // "Add to selection" puts them in the tray instead, to combine with single codes. An ICD-9 code or modifier linked to one of
+  // the ticked fee codes goes with that fee code ("for"), as with linked favourites; others let MedBilling Logs place them.
+  function groupSendSheet(gid) {
+    const g = groupById(gid); if (!g || !pickMulti()) return;
+    const L = groupSendable(g), cap = tmax(), W = { H: 'fee code', I: 'ICD-9 code', M: 'modifier' };
+    const sel = { H: new Set(L.H.slice(0, cap)), I: new Set(L.I.slice(0, cap)), M: new Set(L.M.slice(0, cap)) };
+    const over = ['H', 'I', 'M'].filter(t => L[t].length > cap);
+    const desc = (t, c) => t === 'H' ? (BYCODE[c] || {}).desc || '' : t === 'I' ? (ICDBY[c] ? icdLabel(ICDBY[c]) : '') : modNice((MODXBY[c] || {}).n);
+    const sec = t => L[t].length ? `<p class="fgsub">${W[t] === 'ICD-9 code' ? 'ICD-9 codes' : W[t].charAt(0).toUpperCase() + W[t].slice(1) + 's'} <span class="lkn" data-gscnt="${t}"></span></p>
+      <div class="fgopts gsend" role="group">${L[t].map(c => `<label class="fgopt k-${t}"><input type="checkbox" data-gs="${t}:${esc(c)}"${sel[t].has(c) ? ' checked' : ''}><span class="code">${esc(c)}</span><span class="fgpl">${esc(desc(t, c))}</span></label>`).join('')}</div>` : '';
+    const body = `<p class="small muted fgnote">Sends the ticked codes to your MedBilling Logs row in one go (up to ${cap} fee codes, ${cap} ICD-9 codes and ${cap} modifiers). Untick any you don't need, or close this and tap single codes in the group.</p>
+      ${over.length ? `<p class="fgerr gsover">${over.map(t => `This group has ${L[t].length} ${W[t]}s; one send takes ${cap}, so the first ${cap} are ticked.`).join(' ')}</p>` : ''}
+      ${trayN() ? `<p class="small fgnote">${trayN()} code${trayN() === 1 ? ' is' : 's are'} already selected and will go too.</p>` : ''}
+      ${sec('H')}${sec('I')}${sec('M')}<p class="fgerr" id="gsErr" role="alert" hidden></p>
+      <div class="fgacts"><button type="button" class="ghost" data-close>Cancel</button><button type="button" class="ghost" id="gsAdd">Add to selection</button><button type="button" class="primary" id="gsSend">Send</button></div>`;
+    openSheet('fgSendSheet', 'Send ' + esc(g.name), body, el => {
+      const err = $('#gsErr', el), n = () => sel.H.size + sel.I.size + sel.M.size;
+      const paint = () => { $$('[data-gscnt]', el).forEach(x => { x.textContent = `${sel[x.dataset.gscnt].size} of ${cap}`; });
+        $('#gsSend', el).textContent = `Send ${n() + trayN()} code${n() + trayN() === 1 ? '' : 's'}`; $('#gsSend', el).disabled = !(n() + trayN()); $('#gsAdd', el).disabled = !n(); };
+      paint();
+      el.addEventListener('change', e => { const c = e.target.closest('input[data-gs]'); if (!c) return; const t = c.dataset.gs[0], code = c.dataset.gs.slice(2);
+        if (c.checked && sel[t].size >= cap) { c.checked = false; err.textContent = `Up to ${cap} ${W[t]}s per send. Untick one first.`; err.hidden = false; return; }
+        err.hidden = true; if (c.checked) sel[t].add(code); else sel[t].delete(code); paint(); });
+      const toTray = () => {   // keep the group's order; linked ICD-9 / modifiers go with their fee code
+        const fees = L.H.filter(c => sel.H.has(c)); let full = 0;
+        fees.forEach(c => { if (trayAdd('H', c)) full++; });
+        L.I.filter(c => sel.I.has(c)).forEach(c => { const f = fees.find(h => isLinked(hk(h), ik(c))) || ''; if (trayAdd('I', c, f)) full++; });
+        L.M.filter(c => sel.M.has(c)).forEach(c => { const f = fees.find(h => isModLinked(hk(h), 'M:' + c)) || ''; if (trayAdd('M', c, f)) full++; });
+        GS.used[gid] = new Date().toISOString(); saveGroups(); traySave(); return full;
+      };
+      el.addEventListener('click', e => {
+        if (e.target.closest('#gsAdd')) { const full = toTray(); closeSheet(); paintTray(); refreshSaved(); toast(`${g.name}: ${n()} code${n() === 1 ? '' : 's'} added to the selection${full ? ` (${full} not added: ${cap} per kind at most)` : ''}. Tap Send when ready`, 3800); return; }
+        if (e.target.closest('#gsSend')) { const full = toTray(); closeSheet(); if (full) toast(`${full} code${full === 1 ? '' : 's'} not sent: ${cap} per kind at most`, 3000); sendMulti(trayPayload()); }
+      });
     });
   }
   function openSaved(which) {
@@ -1816,7 +2009,7 @@
     const acts = o.a.filter(a => a[0]).map(a => esc(a[0]) + (o.a.length > 1 ? ` (${a[1]})` : '')).join('; ');
     const ex = o.e.map(c => BYCODE[c] ? `<a href="#/code/${esc(c)}">${esc(c)}</a>` : esc(c)).join(', ');
     return `<div class="modrow${o.k === 'E' ? ' mx' : ''}" data-mod="${esc(o.c)}"${o.k === 'E' ? ' data-mx="1"' : ''}>
-      <div class="mr1"><span class="code">${esc(o.c)}</span><span class="mname">${esc(modNice(o.n))}</span>${pselBtn('M', o.c)}</div>
+      <div class="mr1"><span class="code">${esc(o.c)}</span><span class="mname">${esc(modNice(o.n))}</span>${o.k === 'E' && JUR === 'AB' ? `<button type="button" class="mgrp" data-modgrp="${esc(o.c)}" aria-label="Add modifier ${esc(o.c)} to a code group" title="Add to a code group">${groupsOfMod(o.c).length ? '✓ In group' : '+ Group'}</button>` : ''}${pselBtn('M', o.c)}</div>
       <div class="mr2"><span class="badge mk-${o.k}" title="${o.k === 'E' ? 'Explicit: you enter it on the claim' : 'Implicit: derived by the claims system, not entered on the claim'}">${o.k === 'E' ? 'Explicit' : 'Implicit'}</span><span class="mtype">${esc(o.t)} · ${esc(modNice(T.n || ''))}</span>${o.h ? `<span class="mh">on ${o.h.toLocaleString()} HSC${o.h === 1 ? '' : 's'}</span>` : ''}</div>
       ${o.d ? `<div class="mdesc">${esc(o.d)}</div>` : ''}
       <details class="mmore"><summary>When it applies</summary>
@@ -2025,16 +2218,20 @@
       const tg = e.target.closest('[data-fgtoggle]'); if (tg) { toggleGroup(tg.dataset.fgtoggle); return; }
       const gm = e.target.closest('[data-fgmenu]'); if (gm) { groupSheet(gm.dataset.fgmenu); return; }
       const ga = e.target.closest('[data-fgadd]'); if (ga) { groupPicker(ga.dataset.fgadd); return; }
-      if (e.target.closest('#favNewGrp')) { groupEditor(null, id => { if (FAVS.some(k => !heldJur(splitKey(k).jur))) groupPicker(id); }); return; }
+      if (e.target.closest('#favNewGrp')) { groupEditor(null, id => groupPicker(id)); return; }
+      // v38 code groups: sort toggle, Send (multi-code pick), a modifier row (opens it on the Modifiers tab)
+      const gs = e.target.closest('[data-gsort]');
+      if (gs) { const v = gs.dataset.gsort; if (GSORTS.includes(v) && v !== GS.sort) { GS.sort = v; saveGroups(); renderSaved(); toast(v === 'az' ? 'Groups sorted A–Z' : v === 'recent' ? 'Groups sorted by most recently used' : 'Groups in your own order'); } const b2 = $(`#results [data-gsort="${v}"]`); if (b2) b2.focus({ preventScroll: true }); return; }
+      const fs = e.target.closest('[data-fgsend]'); if (fs) { groupSendSheet(fs.dataset.fgsend); return; }
       if (e.target.closest('.favtools')) return;
       const b = e.target.closest('.hit'); if (!b) return;
+      if (b.dataset.gmod) { const m = b.dataset.gmod; touchKey('M:' + m); if (JUR === 'AB') { showTab('modifiers'); $('#mf').value = m; renderMods(); history.replaceState(null, '', '#/modifiers/' + encodeURIComponent(m)); window.scrollTo(0, 0); } return; }
       if (b.dataset.jur) { switchJur(b.dataset.jur, b.dataset.icd ? '#/medres/' + b.dataset.icd : '#/code/' + b.dataset.code); return; }
       if (b.dataset.icd) showMedRes(b.dataset.icd); else showCode(b.dataset.code);
     });
     $('#impFile').addEventListener('change', e => { const f = e.target.files && e.target.files[0]; if (f) importSaved(f); });
     $('#results').addEventListener('input', e => { if (e.target.id === 'favq') onFavFilter(e.target.value); });
     $('#results').addEventListener('keydown', e => { if (e.target.id === 'favq' && e.key === 'Enter') { e.preventDefault(); e.target.blur(); } });
-    $('#results').addEventListener('change', e => { if (e.target.id === 'favSort') { GS.sort = e.target.value === 'az' ? 'az' : 'custom'; saveGroups(); renderSaved(); const s2 = $('#favSort'); if (s2) s2.focus(); } });
     if (FAVS.length) persistStorage();
     $$('[data-saved]').forEach(b => b.addEventListener('click', () => { closeMore(); openSaved(b.dataset.saved); }));
     $('#askGeneral').onclick = () => openAI(generalPrompt());
@@ -2045,7 +2242,7 @@
     let t; const deb = fn => () => { clearTimeout(t); t = setTimeout(fn, 150); };
     $('#pf').addEventListener('input', deb(renderPrice)); $('#rf').addEventListener('input', deb(renderRules));
     $('#mf').addEventListener('input', deb(renderMods));
-    $('#modifiers').addEventListener('click', e => { const b = e.target.closest('[data-mk]'); if (b) { modKind = b.dataset.mk; modKindSet = true; renderMods(); } }); $('#ef').addEventListener('input', deb(renderExpl));
+    $('#modifiers').addEventListener('click', e => { const g = e.target.closest('[data-modgrp]'); if (g) { modGroupSheet(g.dataset.modgrp); return; } const b = e.target.closest('[data-mk]'); if (b) { modKind = b.dataset.mk; modKindSet = true; renderMods(); } }); $('#ef').addEventListener('input', deb(renderExpl));
     document.addEventListener('click', e => {
       const c = e.target.closest('[data-copy]'); if (c) { copy(c.dataset.copy, c.dataset.copy + ' copied'); return; }
       const m = e.target.closest('[data-medres]'); if (m) showMedRes(m.dataset.medres);
@@ -2058,11 +2255,12 @@
   // with linked codes pre-selects its linked set; otherwise a tap sends that one code, as before (pickTap).
   function pickTap(code, kind) {
     code = String(code || '').trim().toUpperCase();
-    if (!pickMulti()) return kind === 'mod' ? false : sendPick(code, kind);
+    if (!pickMulti()) { if (kind !== 'mod') touchKey(kind === 'dx' ? ik(code) : hk(code)); return kind === 'mod' ? false : sendPick(code, kind); }
     const t = kind === 'dx' ? 'I' : kind === 'mod' ? 'M' : 'H';
     if (t === 'M' && !modOk(code)) return false;
     if (trayN()) { trayToggle(t, code); return true; }
     const key = t === 'H' ? hk(code) : t === 'I' ? ik(code) : '';
+    touchKey(key || 'M:' + code);
     if (key && isFav(key) && (linksOf(key).some(k => splitKey(k).jur === JUR) || modsOf(key).some(m => modOk(m.slice(2))))) { trayLinked(key); return true; }
     if (t === 'M') return sendMulti({ fee: [], dx: [], dxFor: [], mod: [code], modFor: [''] });
     return sendPick(code, kind);
@@ -2083,12 +2281,12 @@
     // v35 linked chip: sends that one code (ICD-9 -> Dx; fee code when picking a fee code); v36 multi-code: also modifiers, and adds to a selection
     const lc = t.closest('[data-lk]');
     if (lc) { const s = splitKey(lc.dataset.lk); if (s.jur === JUR) { if (s.t === 'I' && ICDBY[s.code]) { stop(); pickTap(s.code, 'dx'); } else if (s.t === 'H' && (p.kind === 'hsc' || (pickMulti() && trayN())) && BYCODE[s.code]) { stop(); pickTap(s.code, 'hsc'); } else if (s.t === 'M' && pickMulti() && modOk(s.code)) { stop(); pickTap(s.code, 'mod'); } } return; }
-    if (t.closest('#pickbar, [data-fav], [data-favmenu], [data-favlink], #snack, .fgh, .favtools, .fgback, #favNewGrp, [data-fgadd], [data-copy], [data-medres], .pdet, a[target="_blank"], select, input, summary, .mmore, #pBack, #pDoc, #askCode, #copyCode, #medBack, #pMore, [data-mk], dialog')) return;
+    if (t.closest('#pickbar, [data-fav], [data-favmenu], [data-gmodmenu], [data-modgrp], [data-favlink], #snack, .fgh, .favtools, .fgback, #favNewGrp, [data-fgadd], [data-copy], [data-medres], .pdet, a[target="_blank"], select, input, summary, .mmore, #pBack, #pDoc, #askCode, #copyCode, #medBack, #pMore, [data-mk], dialog')) return;
     const mr = t.closest('.modrow[data-mx]'); if (mr && pickMulti()) { stop(); pickTap(mr.dataset.mod, 'mod'); return; }
     const ir = t.closest('.icdrow'); if (ir && ir.dataset.icd) { stop(); pickTap(ir.dataset.icd, 'dx'); return; }
     const h = t.closest('#results .hit');
     const hscOk = p.kind === 'hsc' || (pickMulti() && trayN());   // picking a Dx: a fee row opens its details, unless a selection is under way
-    if (h) { if (h.dataset.jur) return; if (h.dataset.icd) { stop(); pickTap(h.dataset.icd, 'dx'); } else if (h.dataset.code && hscOk) { stop(); pickTap(h.dataset.code, 'hsc'); } return; }
+    if (h) { if (h.dataset.jur) return; if (h.dataset.gmod) { if (pickMulti() && modOk(h.dataset.gmod)) { stop(); pickTap(h.dataset.gmod, 'mod'); } return; } if (h.dataset.icd) { stop(); pickTap(h.dataset.icd, 'dx'); } else if (h.dataset.code && hscOk) { stop(); pickTap(h.dataset.code, 'hsc'); } return; }
     const a = t.closest('#pricelist a.code'); if (a && hscOk) { const m = (a.getAttribute('href') || '').match(/^#\/code\/(.+)$/); if (m && BYCODE[decodeURIComponent(m[1])]) { stop(); pickTap(decodeURIComponent(m[1]), 'hsc'); } return; }
     if (t.closest('#detail .codebig') && current) { stop(); pickTap(current, 'hsc'); return; }
     const mc = t.closest('#tab-medres .condhead h2 .code'); if (mc) { stop(); pickTap(mc.textContent, 'dx'); }
@@ -2102,6 +2300,10 @@
   const favMenu = s => { if (ready) codeSheet(s.dataset.favmenu, { from: s.dataset.g }); };
   document.addEventListener('click', e => { const s = e.target.closest && e.target.closest('[data-favmenu]'); if (!s) return; e.preventDefault(); e.stopPropagation(); favMenu(s); }, true);
   document.addEventListener('keydown', e => { const s = e.target.closest && e.target.closest('[data-favmenu]'); if (!s || (e.key !== 'Enter' && e.key !== ' ')) return; e.preventDefault(); e.stopPropagation(); favMenu(s); }, true);
+  // v38: ⋯ on a modifier inside a code group
+  const gmodMenu = s => { if (ready) modGroupSheet(s.dataset.gmodmenu, { from: s.dataset.g }); };
+  document.addEventListener('click', e => { const s = e.target.closest && e.target.closest('[data-gmodmenu]'); if (!s) return; e.preventDefault(); e.stopPropagation(); gmodMenu(s); }, true);
+  document.addEventListener('keydown', e => { const s = e.target.closest && e.target.closest('[data-gmodmenu]'); if (!s || (e.key !== 'Enter' && e.key !== ' ')) return; e.preventDefault(); e.stopPropagation(); gmodMenu(s); }, true);
   // v35 linked chips beside a favourite: open the linked code (other province: switch); ✎ opens the link picker
   const chipAct = s => { if (!ready) return;
     if (s.dataset.favlink) { linkSheet(s.dataset.favlink); return; }
