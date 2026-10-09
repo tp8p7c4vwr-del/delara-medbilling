@@ -465,3 +465,40 @@ html.phone .mgrp{min-height:36px}
 @media (max-width:480px){.fgh:has(.fgsend) .fgtype span,.fgtoggle:has(.fgwhen) .fgtype span{display:none}.fgh:has(.fgsend) .fgtype,.fgtoggle:has(.fgwhen) .fgtype{padding:1px 4px}.fgsortb{padding:0 9px}}
 .fgaddseg.n2{grid-template-columns:1fr 1fr}.fgaddseg.n3{grid-template-columns:repeat(3,1fr)}.fgaddseg.n4{grid-template-columns:repeat(4,1fr)}
 .gmod .gsp{flex:0 0 auto;min-width:32px}html.phone .gmod .gsp{min-width:44px}@media (pointer:coarse){.gmod .gsp{min-width:44px}}
+/* v39 slim Favourites (Jose Oct 9): every favourite is ONE line: code · description … · linked chips · fee · ★ · ⋯.
+   The description truncates first; only the linked chips wrap (inside their own box) when they really don't fit.
+   Chips show just the code in a narrow list and code + short title when the list is wide. */
+.hit.compact.haslinks,#results .hit.compact.haslinks{flex-wrap:nowrap;row-gap:0;padding-top:2px;padding-bottom:2px}
+.hit.compact.haslinks .cdesc{flex:1 1 3em;min-width:2.5em}
+.hit.compact .lnks{order:0;flex:0 1 auto;min-width:0;max-width:none;display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:3px 4px;padding:0;overflow:visible}
+.hit.compact .lnkic{display:none}
+.hit.compact .lchip{flex:0 0 auto;max-width:none;min-height:22px;padding:0 6px;gap:3px;font-size:.74rem;line-height:1.15}
+.hit.compact .lchip .code{font-size:.74rem}
+.hit.compact .lchip .ld{display:none}
+.hit.compact .lchip.ledit{padding:0 6px;font-size:.78rem}
+.hit.compact .lchip::after{content:'';position:absolute;inset:-6px -2px}
+@container (min-width:640px){
+  .hit.compact .lnks{flex-wrap:nowrap;max-width:52%;overflow:hidden;justify-content:flex-start}
+  .hit.compact .lchip{flex:0 1 auto;min-width:3.6em;max-width:13em;overflow:hidden}
+  .hit.compact .lchip.ledit{flex:0 0 auto;min-width:0}
+  .hit.compact .lchip .ld{display:inline;min-width:0;overflow:hidden;text-overflow:ellipsis}
+  .hit.compact.haslinks .cdesc{flex:1 1 8em}
+}
+@container (min-width:960px){.hit.compact .lchip{max-width:17em}.hit.compact .lnks{max-width:50%}}
+html.phone .hit.compact .lchip,html.phone .hit.compact .lchip .code{font-size:.78rem}
+html.phone .hit.compact .lchip{min-height:28px}
+@media (pointer:coarse){.hit.compact .lchip{min-height:28px}.hit.compact .lchip::after{inset:-8px -2px}}
+/* tighter spacing between favourite / recent rows */
+#results.list:has(#savedFav){gap:4px}
+#results .fgbody>.hit.compact{min-height:38px}
+/* home view (Favourites / Recent, no code open) on a large screen: the list uses the full width instead of the 420px column */
+@media(min-width:900px){.split:has(> #detail[hidden]):has(#savedFav){grid-template-columns:1fr}}
+/* v39 narrow lists (phones, the 420px column next to an open code): smaller chips (code only), description gets room first */
+@container (max-width:639.98px){
+  .hit.compact.haslinks .cdesc{flex:1 1 2.5em;min-width:2.5em}
+  #results .hit.compact.haslinks{gap:5px}
+  .hit.compact .lchip.ledit{min-width:20px;padding:0 3px;border-color:#cbd5e1;justify-content:center}
+}
+html.phone .hit.compact .lchip{min-height:24px;padding:0 4px}
+html.phone .hit.compact .lchip::after{inset:-10px -1px}
+@media (pointer:coarse){.hit.compact .lchip{min-height:24px}.hit.compact .lchip::after{inset:-10px -1px}}
